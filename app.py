@@ -138,7 +138,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה (תיקון: ברים עבים וצמודים)
+        # פירוט תשלומים למשפחה (תיקון: קיבוץ לפי חודש וצבעים)
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -148,47 +148,55 @@ if uploaded_file is not None:
         if len(paying_families) > 0:
             selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
             
+            # סינון הנתונים
             family_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
             ].copy()
             
             if not family_payments.empty:
-                # מיון כרונולוגי
+                # מיון לפי תאריך
                 family_payments = family_payments.sort_values('Date')
                 
-                # הכנת תוויות טקסט
-                family_payments['DateLabel'] = family_payments['Date'].dt.strftime('%d/%m')
+                # יצירת מזהה ייחודי לכל תשלום (כדי למנוע סכימה אוטומטית)
+                # זה גורם לברים להופיע בנפרד גם אם הם באותו חודש
+                family_payments['PaymentID'] = family_payments.index.astype(str)
                 
-                # יצירת הגרף עם היררכיה בציר X: חודש למטה, תאריך למעלה
+                # הטריק החשוב:
+                # ציר ה-X הוא רק החודש (Month).
+                # אנחנו משתמשים ב-color='Month' כדי שכל חודש יהיה בצבע אחר.
+                # אנחנו משתמשים ב-barmode='group' כדי שברים באותו חודש יוצגו זה לצד זה.
+                
                 fig_family = px.bar(
                     family_payments, 
-                    x=[family_payments['Month'], family_payments['DateLabel']], # ציר X כפול ומדורג
+                    x='Month',          # קיבוץ לפי חודש בציר ה-X
                     y='Credit', 
                     text='Credit',
-                    color='Month', # צביעה לפי חודש
+                    color='Month',      # צבע שונה לכל חודש
+                    # הוספת פרטים בריחוף (Hover)
+                    hover_data={'Date': '|%d/%m/%Y', 'Month': False, 'Credit': ':.0f'},
                     title=f'היסטוריית תשלומים - {selected_family}',
-                    labels={'Credit': 'סכום (ש"ח)', 'value': 'סכום'}
+                    labels={'Credit': 'סכום (ש"ח)', 'Month': 'חודש'}
                 )
                 
-                # עיצוב המספרים והטקסט
+                # מצב Group גורם לברים שחולקים אותו X לעמוד צמודים
+                fig_family.update_layout(barmode='group')
+                
+                # עיצוב המספרים
                 fig_family.update_traces(
                     texttemplate='%{text:.0f}', 
                     textposition='outside',
                     textfont_size=16
                 )
                 
-                # --- תיקון הקווים הדקים ---
-                # 1. מגדירים את הציר כקטגורי כדי למנוע רווחים של תאריכים
-                # 2. מגדירים כותרות
-                fig_family.update_xaxes(type='category', title_text="חודש ותאריך תשלום")
+                # הגדרות ציר ועיצוב כללי
+                fig_family.update_xaxes(type='category', title_text="חודש תשלום")
                 fig_family.update_yaxes(title_text='סכום (ש"ח)')
                 
-                # עיצוב כללי - הסתרת מקרא וקביעת מרווחים
                 fig_family.update_layout(
-                    showlegend=False,
-                    bargap=0.2,       # רווח בין קבוצות (חודשים)
-                    bargroupgap=0.1   # רווח בין ברים באותו חודש
+                    showlegend=False,   # אין צורך במקרא
+                    bargap=0.2,         # רווח בין חודשים
+                    bargroupgap=0.05    # רווח קטנטן בין ברים באותו חודש
                 )
                 
                 st.plotly_chart(fig_family, use_container_width=True)
