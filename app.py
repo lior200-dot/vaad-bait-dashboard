@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 
 # --- הגדרות עמוד ---
@@ -10,10 +9,7 @@ st.title("🏠 דשבורד ניהול כספי - ועד בית")
 
 # --- פונקציית טעינת נתונים ---
 def load_data(uploaded_file):
-    # מדלגים על 4 שורות ראשונות
     df = pd.read_excel(uploaded_file, skiprows=4)
-    
-    # שינוי שמות עמודות
     cols = df.columns.tolist()
     if len(cols) >= 9:
         mapping = {
@@ -27,20 +23,28 @@ def load_data(uploaded_file):
         }
         df = df.rename(columns=mapping)
     
-    # ניקוי נתונים
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     df['Credit'] = pd.to_numeric(df['Credit'], errors='coerce').fillna(0)
     df['Debit'] = pd.to_numeric(df['Debit'], errors='coerce').fillna(0)
     df['Balance'] = pd.to_numeric(df['Balance'], errors='coerce').fillna(0)
     
-    # המרת שדות טקסט
     df['Details'] = df['Details'].fillna('').astype(str)
     df['Action'] = df['Action'].fillna('').astype(str)
     df['Beneficiary'] = df['Beneficiary'].fillna('').astype(str)
     
+    # עמודת חודש לשימוש בגרפים
     df['Month'] = df['Date'].dt.to_period('M').astype(str)
     
     return df
+
+# --- פונקציית עזר לקטגוריזציה ---
+def categorize_expense(row):
+    text = (str(row['Action']) + " " + str(row['Details'])).lower()
+    if 'ע.מפעולות-ישיר' in text or 'ע. מפעולות ישיר' in text or 'ע. מסלול בסיסי' in text or 'ע.מפעולות-פקיד' in text:
+        return 'עמלות בנק'
+    if 'גז ניהול מבנים' in text:
+        return 'גז ניהול מבנים'
+    return row['Details'] if row['Details'] else row['Action']
 
 # --- ממשק צד (Sidebar) ---
 st.sidebar.header("העלאת נתונים")
@@ -58,6 +62,7 @@ if uploaded_file is not None:
         start_date = st.sidebar.date_input("תאריך התחלה", min_date)
         end_date = st.sidebar.date_input("תאריך סיום", max_date)
         
+        # סינון הדאטה
         mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
         df_filtered = df.loc[mask]
         
@@ -95,7 +100,7 @@ if uploaded_file is not None:
             st.plotly_chart(fig_bal, use_container_width=True)
 
         # ========================================================
-        # שורה 2: חשמל ותשלומים כלליים
+        # שורה 2: חשמל ותשלומים
         # ========================================================
         col_mid1, col_mid2 = st.columns(2)
 
@@ -130,7 +135,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # חלק חדש ומעודכן: פירוט תשלומים למשפחה (גרף ברים מקובץ)
+        # פירוט תשלומים למשפחה
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -148,51 +153,23 @@ if uploaded_file is not None:
             if not family_payments.empty:
                 family_payments = family_payments.sort_values('Date')
                 
-                # יצירת תווית "חודש/שנה" בלבד (למשל: 01/2026)
-                family_payments['Month_Label'] = family_payments['Date'].dt.strftime('%m/%Y')
+                # יצירת מזהה ייחודי לכל תשלום כדי להבדיל בין תשלומים באותו חודש
+                # שימוש בעמודת ה-Month המוכנה יוצר קיבוץ אוטומטי
+                fig_family = px.bar(family_payments, 
+                                    x='Month', 
+                                    y='Credit', 
+                                    text='Credit',
+                                    # צביעה לפי חודש יוצרת הפרדה ויזואלית ברורה
+                                    color='Month', 
+                                    title=f'היסטוריית תשלומים - {selected_family}',
+                                    labels={'Credit': 'סכום (ש"ח)', 'Month': 'חודש'},
+                                    barmode='group')
                 
-                # יצירת אינדקס פנימי כדי לדעת אם זה התשלום הראשון, השני, וכו' באותו חודש
-                family_payments['Payment_Num'] = family_payments.groupby('Month_Label').cumcount()
+                fig_family.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+                fig_family.update_layout(showlegend=False, bargap=0.2)
                 
-                # בניית הגרף המתקדם
-                fig_family = go.Figure()
-                unique_months = family_payments['Month_Label'].unique()
-                color_palette = px.colors.qualitative.Pastel # סקאלת צבעים יפה להפרדת חודשים
-                added_to_legend = set()
-                
-                for idx, row in family_payments.iterrows():
-                    m_label = row['Month_Label']
-                    # בחירת צבע ייחודי לכל חודש
-                    m_color = color_palette[list(unique_months).index(m_label) % len(color_palette)]
-                    p_num = str(row['Payment_Num'])
-                    
-                    # הצגת כל חודש פעם אחת בלבד במקרא הצדדי
-                    show_leg = m_label not in added_to_legend
-                    added_to_legend.add(m_label)
-                    
-                    fig_family.add_trace(go.Bar(
-                        x=[m_label],
-                        y=[row['Credit']],
-                        text=[f"{row['Credit']:.0f}"],
-                        textposition='outside',
-                        marker_color=m_color,
-                        name=m_label,
-                        offsetgroup=p_num, # זה מה שמצמיד ברים של אותו חודש ביחד!
-                        showlegend=show_leg,
-                        hovertemplate="חודש: %{x}<br>סכום: %{y} ש\"ח<br>תאריך מדוייק: " + row['Date'].strftime('%d/%m/%Y') + "<extra></extra>"
-                    ))
-                    
-                fig_family.update_layout(
-                    barmode='group',
-                    title=f'היסטוריית תשלומים - {selected_family}',
-                    xaxis_title='חודש ושנה',
-                    yaxis_title='סכום (ש"ח)',
-                    yaxis=dict(range=[0, family_payments['Credit'].max() * 1.3]),
-                    xaxis=dict(type='category') # שומר על סדר החודשים ומרווחים נכונים
-                )
                 st.plotly_chart(fig_family, use_container_width=True)
 
-            # טבלת נתונים למטה
             st.caption("פירוט בטבלה:")
             display_table = family_payments[['Date', 'Credit', 'Details', 'Action']].copy()
             display_table['Date'] = display_table['Date'].dt.strftime('%d/%m/%Y')
@@ -200,28 +177,20 @@ if uploaded_file is not None:
             st.dataframe(display_table, use_container_width=True, hide_index=True)
             
             total_paid = family_payments['Credit'].sum()
-            st.write(f"**סה\"כ שולם ע\"י משפחת {selected_family} בתקופה זו:** {total_paid:,.0f} ש\"ח")
+            st.write(f"**סה\"כ שולם בתקופה זו:** {total_paid:,.0f} ש\"ח")
 
         else:
             st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
 
         # ========================================================
-        # שורה אחרונה: פילוח הוצאות (Pie Charts)
+        # פילוח הוצאות (כללי)
         # ========================================================
         st.markdown("---")
-        st.subheader("🍰 פילוח הוצאות")
+        st.subheader("🍰 פילוח הוצאות (כללי)")
         expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
         
         if not expense_df.empty:
-            def categorize(row):
-                text = (str(row['Action']) + " " + str(row['Details'])).lower()
-                if 'ע.מפעולות-ישיר' in text or 'ע. מפעולות ישיר' in text or 'ע. מסלול בסיסי' in text or 'ע.מפעולות-פקיד' in text:
-                    return 'עמלות בנק'
-                if 'גז ניהול מבנים' in text:
-                    return 'גז ניהול מבנים'
-                return row['Details'] if row['Details'] else row['Action']
-
-            expense_df['Category'] = expense_df.apply(categorize, axis=1)
+            expense_df['Category'] = expense_df.apply(categorize_expense, axis=1)
             cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
             
             p_col1, p_col2 = st.columns(2)
@@ -244,6 +213,61 @@ if uploaded_file is not None:
                     st.plotly_chart(fig_p2, use_container_width=True)
                 else:
                     st.info("אין הוצאות נוספות מלבד גז.")
+
+        # ========================================================
+        # חלק חדש: פירוט חודשי (הכנסות והוצאות)
+        # ========================================================
+        st.markdown("---")
+        st.subheader("📅 פירוט חודשי ממוקד")
+        
+        # רשימת החודשים הזמינים בנתונים המסוננים
+        available_months = sorted(df_filtered['Month'].unique(), reverse=True)
+        
+        if len(available_months) > 0:
+            selected_month = st.selectbox("בחר חודש לצפייה בפירוט:", available_months)
+            
+            # סינון הנתונים לחודש הנבחר
+            month_data = df_filtered[df_filtered['Month'] == selected_month]
+            
+            m_col1, m_col2 = st.columns(2)
+            
+            # --- עוגת הכנסות (Credit) ---
+            with m_col1:
+                st.caption(f"הכנסות - {selected_month}")
+                month_income = month_data[month_data['Credit'] > 0]
+                
+                if not month_income.empty:
+                    # מקבצים לפי שם המשפחה
+                    income_pie = month_income.groupby('Beneficiary')['Credit'].sum().reset_index()
+                    fig_m_inc = px.pie(income_pie, values='Credit', names='Beneficiary', hole=0.3,
+                                       color_discrete_sequence=px.colors.qualitative.Set3)
+                    fig_m_inc.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_m_inc.update_layout(showlegend=False)
+                    st.plotly_chart(fig_m_inc, use_container_width=True)
+                    st.write(f"סה\"כ הכנסות: {month_income['Credit'].sum():,.0f} ש\"ח")
+                else:
+                    st.info("אין הכנסות בחודש זה.")
+            
+            # --- עוגת הוצאות (Debit) ---
+            with m_col2:
+                st.caption(f"הוצאות - {selected_month}")
+                month_expense = month_data[month_data['Debit'] > 0].copy()
+                
+                if not month_expense.empty:
+                    # קטגוריזציה להוצאות החודשיות
+                    month_expense['Category'] = month_expense.apply(categorize_expense, axis=1)
+                    expense_pie = month_expense.groupby('Category')['Debit'].sum().reset_index()
+                    
+                    fig_m_exp = px.pie(expense_pie, values='Debit', names='Category', hole=0.3,
+                                       color_discrete_sequence=px.colors.qualitative.Pastel)
+                    fig_m_exp.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_m_exp.update_layout(showlegend=True, legend=dict(orientation="h"))
+                    st.plotly_chart(fig_m_exp, use_container_width=True)
+                    st.write(f"סה\"כ הוצאות: {month_expense['Debit'].sum():,.0f} ש\"ח")
+                else:
+                    st.info("אין הוצאות בחודש זה.")
+        else:
+            st.info("אין נתונים זמינים לבחירת חודשים.")
 
     except Exception as e:
         st.error(f"שגיאה בעיבוד הקובץ: {e}")
