@@ -76,7 +76,6 @@ if uploaded_file is not None:
         with col_top1:
             st.subheader("⚖️ הכנסות מול הוצאות (חודשי)")
             if not df_filtered.empty:
-                # מיון נכון של חודשים (לפי תאריך אמיתי ולא טקסט)
                 monthly_summary = df_filtered.copy()
                 monthly_summary['MonthDate'] = monthly_summary['Date'].dt.to_period('M')
                 grouped = monthly_summary.groupby('MonthDate')[['Credit', 'Debit']].sum().reset_index()
@@ -130,7 +129,9 @@ if uploaded_file is not None:
             st.subheader("🏆 סיכום תשלומים לפי משפחה")
             income_df = df_filtered[df_filtered['Credit'] > 0]
             if not income_df.empty:
-                total_per_family = income_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Credit', ascending=False)
+                # --- שינוי: מיון לפי שם (Beneficiary) במקום לפי סכום ---
+                total_per_family = income_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Beneficiary', ascending=True)
+                
                 fig_pay = px.bar(total_per_family, x='Beneficiary', y='Credit', text='Credit',
                                  labels={'Credit': 'סה"כ שולם', 'Beneficiary': 'משפחה'},
                                  color_discrete_sequence=['teal'])
@@ -140,7 +141,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה (הגרף המשופר שביקשת)
+        # פירוט תשלומים למשפחה
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -150,32 +151,26 @@ if uploaded_file is not None:
         if len(paying_families) > 0:
             selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
             
-            # סינון ומיון כרונולוגי
             family_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
             ].copy().sort_values('Date')
             
             if not family_payments.empty:
-                # 1. יצירת מזהה ייחודי לכל שורה (כדי שיוצגו בנפרד)
                 family_payments['RowID'] = range(len(family_payments))
-                
-                # 2. הכנת טקסטים לתצוגה
                 family_payments['FullDate'] = family_payments['Date'].dt.strftime('%d/%m/%Y')
                 
-                # 3. יצירת הגרף על בסיס ה-RowID (ציר X שהוא אינדקס ולא קטגוריה מאחדת)
                 fig_family = px.bar(
                     family_payments, 
-                    x='RowID',          # שימוש באינדקס ייחודי מונע איחוד
+                    x='RowID', 
                     y='Credit', 
                     text='Credit',
-                    color='Month',      # צבע שונה לכל חודש
+                    color='Month',
                     hover_data={'FullDate': True, 'Month': False, 'RowID': False},
                     title=f'היסטוריית תשלומים - {selected_family}',
                     labels={'Credit': 'סכום (ש"ח)', 'FullDate': 'תאריך תשלום'}
                 )
                 
-                # 4. עדכון ציר ה-X כדי להציג את החודש במקום את המספר הסידורי
                 fig_family.update_layout(
                     xaxis=dict(
                         tickmode='array',
@@ -184,21 +179,19 @@ if uploaded_file is not None:
                         title_text="חודש ושנה"
                     ),
                     showlegend=False,
-                    bargap=0.3  # רווח בין ברים - שולט בעובי
+                    bargap=0.3
                 )
                 
-                # 5. עיצוב טקסט בולט וברור
                 fig_family.update_traces(
                     texttemplate='%{text:,.0f}', 
                     textposition='outside',
-                    textfont=dict(size=14, color='black'), # גודל פונט גדול
+                    textfont=dict(size=14, color='black'),
                     marker_line_width=1,
                     marker_line_color='black'
                 )
                 
                 st.plotly_chart(fig_family, use_container_width=True)
 
-            # טבלה
             st.caption("פירוט בטבלה:")
             display_table = family_payments[['Date', 'Credit', 'Details', 'Action']].copy()
             display_table['Date'] = display_table['Date'].dt.strftime('%d/%m/%Y')
@@ -244,20 +237,17 @@ if uploaded_file is not None:
                     st.info("אין הוצאות נוספות מלבד גז.")
 
         # ========================================================
-        # פירוט חודשי (כאן היה התיקון)
+        # פירוט חודשי
         # ========================================================
         st.markdown("---")
         st.subheader("📅 פירוט חודשי ממוקד")
         
-        # חישוב רשימת החודשים הזמינים בצורה שלא גורמת לשגיאת sort_values
         unique_periods = df_filtered['Date'].dt.to_period('M').unique()
-        # מיון באמצעות פייתון רגיל (בטוח יותר לשימוש)
         sorted_periods = sorted(unique_periods, reverse=True)
         available_months = [p.strftime('%m/%Y') for p in sorted_periods]
         
         if len(available_months) > 0:
             selected_month = st.selectbox("בחר חודש לצפייה בפירוט:", available_months)
-            
             month_data = df_filtered[df_filtered['Month'] == selected_month]
             
             m_col1, m_col2 = st.columns(2)
@@ -265,7 +255,6 @@ if uploaded_file is not None:
             with m_col1:
                 st.caption(f"הכנסות - {selected_month}")
                 month_income = month_data[month_data['Credit'] > 0]
-                
                 if not month_income.empty:
                     income_pie = month_income.groupby('Beneficiary')['Credit'].sum().reset_index()
                     fig_m_inc = px.pie(income_pie, values='Credit', names='Beneficiary', hole=0.3,
@@ -280,11 +269,9 @@ if uploaded_file is not None:
             with m_col2:
                 st.caption(f"הוצאות - {selected_month}")
                 month_expense = month_data[month_data['Debit'] > 0].copy()
-                
                 if not month_expense.empty:
                     month_expense['Category'] = month_expense.apply(categorize_expense, axis=1)
                     expense_pie = month_expense.groupby('Category')['Debit'].sum().reset_index()
-                    
                     fig_m_exp = px.pie(expense_pie, values='Debit', names='Category', hole=0.3,
                                        color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig_m_exp.update_traces(textposition='inside', textinfo='percent+label')
