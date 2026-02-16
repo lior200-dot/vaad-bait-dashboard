@@ -140,7 +140,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה (החלק שתוקן)
+        # פירוט תשלומים למשפחה (הגרף המשופר שביקשת)
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -244,14 +244,16 @@ if uploaded_file is not None:
                     st.info("אין הוצאות נוספות מלבד גז.")
 
         # ========================================================
-        # פירוט חודשי
+        # פירוט חודשי (כאן היה התיקון)
         # ========================================================
         st.markdown("---")
         st.subheader("📅 פירוט חודשי ממוקד")
         
-        # מיון חודשים נכון (לפי זמן ולא לפי טקסט)
-        available_months_dt = df_filtered['Date'].dt.to_period('M').unique().sort_values(ascending=False)
-        available_months = [m.strftime('%m/%Y') for m in available_months_dt]
+        # חישוב רשימת החודשים הזמינים בצורה שלא גורמת לשגיאת sort_values
+        unique_periods = df_filtered['Date'].dt.to_period('M').unique()
+        # מיון באמצעות פייתון רגיל (בטוח יותר לשימוש)
+        sorted_periods = sorted(unique_periods, reverse=True)
+        available_months = [p.strftime('%m/%Y') for p in sorted_periods]
         
         if len(available_months) > 0:
             selected_month = st.selectbox("בחר חודש לצפייה בפירוט:", available_months)
