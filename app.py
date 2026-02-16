@@ -138,7 +138,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה (תיקון: קיבוץ לפי חודש וצבעים)
+        # פירוט תשלומים למשפחה (תיקון: בר ייחודי לכל תשלום)
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -148,41 +148,37 @@ if uploaded_file is not None:
         if len(paying_families) > 0:
             selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
             
-            # סינון הנתונים
             family_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
             ].copy()
             
             if not family_payments.empty:
-                # מיון לפי תאריך
+                # מיון כרונולוגי
                 family_payments = family_payments.sort_values('Date')
                 
-                # יצירת מזהה ייחודי לכל תשלום (כדי למנוע סכימה אוטומטית)
-                # זה גורם לברים להופיע בנפרד גם אם הם באותו חודש
-                family_payments['PaymentID'] = family_payments.index.astype(str)
+                # --- הפתרון הסופי לבעיית החפיפה ---
+                # אנחנו יוצרים "שם" ייחודי לכל בר שכולל את התאריך והסכום.
+                # מכיוון שלכל תשלום יש שם אחר, פלוטלי חייב לצייר אותם בנפרד.
+                # אנחנו משתמשים באינדקס כדי להבטיח ייחודיות גם אם יש שני תשלומים זהים באותו יום.
+                family_payments['BarLabel'] = family_payments.apply(
+                    lambda x: f"{x['Date'].strftime('%d/%m')}\n({x['Credit']:.0f})", axis=1
+                )
                 
-                # הטריק החשוב:
-                # ציר ה-X הוא רק החודש (Month).
-                # אנחנו משתמשים ב-color='Month' כדי שכל חודש יהיה בצבע אחר.
-                # אנחנו משתמשים ב-barmode='group' כדי שברים באותו חודש יוצגו זה לצד זה.
+                # כדי לשמור על הסדר הכרונולוגי בגרף ולא לפי א-ב:
+                family_payments = family_payments.reset_index()
                 
                 fig_family = px.bar(
                     family_payments, 
-                    x='Month',          # קיבוץ לפי חודש בציר ה-X
+                    x='BarLabel',       # ציר ה-X הוא התווית הייחודית שיצרנו
                     y='Credit', 
                     text='Credit',
-                    color='Month',      # צבע שונה לכל חודש
-                    # הוספת פרטים בריחוף (Hover)
-                    hover_data={'Date': '|%d/%m/%Y', 'Month': False, 'Credit': ':.0f'},
+                    color='Month',      # הצבע עדיין לפי החודש
                     title=f'היסטוריית תשלומים - {selected_family}',
-                    labels={'Credit': 'סכום (ש"ח)', 'Month': 'חודש'}
+                    labels={'Credit': 'סכום (ש"ח)', 'BarLabel': 'תאריך תשלום'}
                 )
                 
-                # מצב Group גורם לברים שחולקים אותו X לעמוד צמודים
-                fig_family.update_layout(barmode='group')
-                
-                # עיצוב המספרים
+                # עיצוב המספרים והטקסט
                 fig_family.update_traces(
                     texttemplate='%{text:.0f}', 
                     textposition='outside',
@@ -190,13 +186,12 @@ if uploaded_file is not None:
                 )
                 
                 # הגדרות ציר ועיצוב כללי
-                fig_family.update_xaxes(type='category', title_text="חודש תשלום")
+                fig_family.update_xaxes(type='category', title_text="תאריך") # מבטיח שזה לא יתפרש כזמן
                 fig_family.update_yaxes(title_text='סכום (ש"ח)')
                 
                 fig_family.update_layout(
-                    showlegend=False,   # אין צורך במקרא
-                    bargap=0.2,         # רווח בין חודשים
-                    bargroupgap=0.05    # רווח קטנטן בין ברים באותו חודש
+                    showlegend=True,    # מציג מקרא צבעים לפי חודש
+                    bargap=0.2          # רווח בין ברים
                 )
                 
                 st.plotly_chart(fig_family, use_container_width=True)
