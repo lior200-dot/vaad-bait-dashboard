@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 
 # --- הגדרות עמוד ---
@@ -65,29 +64,23 @@ if uploaded_file is not None:
         st.success(f"מציג נתונים בין {start_date} ל-{end_date}")
         
         # ========================================================
-        # שורה 1: גרפים כלליים (Figure 3 + Balance)
+        # שורה 1: גרפים כלליים
         # ========================================================
         col_top1, col_top2 = st.columns(2)
         
-        # --- Figure 3: הכנסות מול הוצאות (חדש!) ---
+        # --- Figure 3: הכנסות מול הוצאות ---
         with col_top1:
             st.subheader("⚖️ הכנסות מול הוצאות (חודשי)")
             if not df_filtered.empty:
-                # סיכום לפי חודש
                 monthly_summary = df_filtered.groupby('Month')[['Credit', 'Debit']].sum().reset_index()
-                
-                # המרה למבנה שנוח לגרף (Melting)
                 monthly_melt = monthly_summary.melt(id_vars='Month', value_vars=['Credit', 'Debit'], 
                                                     var_name='Type', value_name='Amount')
-                
-                # שינוי שמות לעברית
                 monthly_melt['Type'] = monthly_melt['Type'].replace({'Credit': 'הכנסות', 'Debit': 'הוצאות'})
                 
                 fig_inc_exp = px.bar(monthly_melt, x='Month', y='Amount', color='Type', barmode='group',
                                      text='Amount',
                                      color_discrete_map={'הכנסות': '#2ecc71', 'הוצאות': '#e74c3c'},
                                      labels={'Amount': 'סכום (ש"ח)', 'Month': 'חודש', 'Type': 'סוג'})
-                
                 fig_inc_exp.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
                 st.plotly_chart(fig_inc_exp, use_container_width=True)
             else:
@@ -100,7 +93,6 @@ if uploaded_file is not None:
             fig_bal = px.line(df_sorted, x='Date', y='Balance',
                               labels={'Balance': 'יתרה', 'Date': 'תאריך'},
                               color_discrete_sequence=['purple'])
-            # פירמוט ציר Y עם פסיקים
             fig_bal.update_layout(yaxis=dict(tickformat=",.0f"))
             st.plotly_chart(fig_bal, use_container_width=True)
 
@@ -142,43 +134,51 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # חלק חדש: פירוט תשלומים לפי בחירת משפחה
+        # חלק חדש: פירוט תשלומים למשפחה (כולל גרף ברים)
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
         
-        # יצירת רשימת משפחות ששילמו (מתוך הנתונים המסוננים)
         paying_families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
         
         if len(paying_families) > 0:
-            # תיבת בחירה (Dropdown)
             selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
             
-            # סינון הנתונים לפי המשפחה שנבחרה
+            # סינון הנתונים למשפחה
             family_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
             ].copy()
             
-            # הצגת סטטיסטיקה קצרה
-            total_paid = family_payments['Credit'].sum()
-            st.write(f"**סה\"כ שולם ע\"י {selected_family} בתקופה זו:** {total_paid:,.0f} ש\"ח")
-            
-            # עיצוב הטבלה להצגה
+            # --- גרף ברים אישי למשפחה ---
+            if not family_payments.empty:
+                # מיון לפי תאריך כדי שהגרף יהיה מסודר
+                family_payments = family_payments.sort_values('Date')
+                
+                # יצירת עמודה לתצוגת תאריך יפה בגרף
+                family_payments['DateStr'] = family_payments['Date'].dt.strftime('%d/%m/%Y')
+                
+                fig_family = px.bar(family_payments, x='DateStr', y='Credit', text='Credit',
+                                    title=f'היסטוריית תשלומים - {selected_family}',
+                                    labels={'Credit': 'סכום (ש"ח)', 'DateStr': 'תאריך תשלום'},
+                                    color_discrete_sequence=['#3498db'])
+                
+                fig_family.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+                # הוספת רווח מלמעלה כדי שהמספרים לא ייחתכו
+                fig_family.update_layout(yaxis=dict(range=[0, family_payments['Credit'].max() * 1.2]))
+                
+                st.plotly_chart(fig_family, use_container_width=True)
+
+            # --- טבלת נתונים ---
+            st.caption("פירוט בטבלה:")
             display_table = family_payments[['Date', 'Credit', 'Details', 'Action']].copy()
-            # פירמוט התאריך לתצוגה ישראלית
             display_table['Date'] = display_table['Date'].dt.strftime('%d/%m/%Y')
-            
-            # שינוי שמות עמודות לעברית
-            display_table = display_table.rename(columns={
-                'Date': 'תאריך',
-                'Credit': 'סכום (ש"ח)',
-                'Details': 'פרטים',
-                'Action': 'פעולה'
-            })
-            
-            # הצגת הטבלה
+            display_table = display_table.rename(columns={'Date': 'תאריך', 'Credit': 'סכום (ש"ח)', 'Details': 'פרטים', 'Action': 'פעולה'})
             st.dataframe(display_table, use_container_width=True, hide_index=True)
+            
+            total_paid = family_payments['Credit'].sum()
+            st.write(f"**סה\"כ שולם בתקופה זו:** {total_paid:,.0f} ש\"ח")
+
         else:
             st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
 
@@ -190,19 +190,15 @@ if uploaded_file is not None:
         expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
         
         if not expense_df.empty:
-            # קטגוריזציה
             def categorize(row):
                 text = (str(row['Action']) + " " + str(row['Details'])).lower()
                 if 'ע.מפעולות-ישיר' in text or 'ע. מפעולות ישיר' in text or 'ע. מסלול בסיסי' in text or 'ע.מפעולות-פקיד' in text:
                     return 'עמלות בנק'
                 if 'גז ניהול מבנים' in text:
                     return 'גז ניהול מבנים'
-                # ברירת מחדל: פרטים, ואם אין אז פעולה
                 return row['Details'] if row['Details'] else row['Action']
 
             expense_df['Category'] = expense_df.apply(categorize, axis=1)
-            
-            # קיבוץ
             cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
             
             p_col1, p_col2 = st.columns(2)
@@ -210,7 +206,6 @@ if uploaded_file is not None:
             with p_col1:
                 st.caption("כלל ההוצאות")
                 fig_p1 = px.pie(cat_summary, values='Debit', names='Category', hole=0.3)
-                # הסתרת אחוזים קטנים (פחות מ-2%)
                 fig_p1.update_traces(textposition='inside', textinfo='percent+label')
                 fig_p1.update_layout(showlegend=True, legend=dict(orientation="h"))
                 st.plotly_chart(fig_p1, use_container_width=True)
