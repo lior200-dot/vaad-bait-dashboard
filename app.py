@@ -13,8 +13,7 @@ def load_data(uploaded_file):
     # מדלגים על 4 שורות ראשונות כמו במטלאב
     df = pd.read_excel(uploaded_file, skiprows=4)
     
-    # שינוי שמות עמודות (לפי המיקום, כמו שעשינו במטלאב)
-    # מוודאים שיש מספיק עמודות
+    # שינוי שמות עמודות (לפי המיקום)
     cols = df.columns.tolist()
     if len(cols) >= 9:
         mapping = {
@@ -65,14 +64,54 @@ if uploaded_file is not None:
         
         st.success(f"מציג נתונים בין {start_date} ל-{end_date}")
         
-        # --- יצירת הגרפים ---
+        # ========================================================
+        # שורה 1: גרפים כלליים (Figure 3 + Balance)
+        # ========================================================
+        col_top1, col_top2 = st.columns(2)
         
-        # שורה 1: חשמל + יתרה
-        col1, col2 = st.columns(2)
-        
-        with col1:
+        # --- Figure 3: הכנסות מול הוצאות (חדש!) ---
+        with col_top1:
+            st.subheader("⚖️ הכנסות מול הוצאות (חודשי)")
+            if not df_filtered.empty:
+                # סיכום לפי חודש
+                monthly_summary = df_filtered.groupby('Month')[['Credit', 'Debit']].sum().reset_index()
+                
+                # המרה למבנה שנוח לגרף (Melting)
+                monthly_melt = monthly_summary.melt(id_vars='Month', value_vars=['Credit', 'Debit'], 
+                                                    var_name='Type', value_name='Amount')
+                
+                # שינוי שמות לעברית
+                monthly_melt['Type'] = monthly_melt['Type'].replace({'Credit': 'הכנסות', 'Debit': 'הוצאות'})
+                
+                fig_inc_exp = px.bar(monthly_melt, x='Month', y='Amount', color='Type', barmode='group',
+                                     text='Amount',
+                                     color_discrete_map={'הכנסות': '#2ecc71', 'הוצאות': '#e74c3c'},
+                                     labels={'Amount': 'סכום (ש"ח)', 'Month': 'חודש', 'Type': 'סוג'})
+                
+                fig_inc_exp.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+                st.plotly_chart(fig_inc_exp, use_container_width=True)
+            else:
+                st.info("אין נתונים להצגה.")
+
+        # --- Figure 6: מגמת יתרה ---
+        with col_top2:
+            st.subheader("💰 מגמת יתרה בחשבון")
+            df_sorted = df_filtered.sort_values('Date')
+            fig_bal = px.line(df_sorted, x='Date', y='Balance',
+                              labels={'Balance': 'יתרה', 'Date': 'תאריך'},
+                              color_discrete_sequence=['purple'])
+            # פירמוט ציר Y עם פסיקים
+            fig_bal.update_layout(yaxis=dict(tickformat=",.0f"))
+            st.plotly_chart(fig_bal, use_container_width=True)
+
+        # ========================================================
+        # שורה 2: חשמל ותשלומים
+        # ========================================================
+        col_mid1, col_mid2 = st.columns(2)
+
+        # --- Figure 1: חשמל ---
+        with col_mid1:
             st.subheader("⚡ הוצאות חשמל")
-            # לוגיקה לזיהוי חשמל
             is_electric = df_filtered['Action'].str.contains('חשמל', na=False) | \
                           df_filtered['Details'].str.contains('חשמל', na=False) | \
                           df_filtered['Beneficiary'].str.contains('חשמל', na=False)
@@ -88,30 +127,23 @@ if uploaded_file is not None:
             else:
                 st.info("לא נמצאו הוצאות חשמל בטווח זה.")
 
-        with col2:
-            st.subheader("💰 מגמת יתרה (Balance Trend)")
-            df_sorted = df_filtered.sort_values('Date')
-            fig_bal = px.line(df_sorted, x='Date', y='Balance',
-                              labels={'Balance': 'יתרה', 'Date': 'תאריך'},
-                              color_discrete_sequence=['purple'])
-            # פירמוט ציר Y עם פסיקים
-            fig_bal.update_layout(yaxis=dict(tickformat=",.0f"))
-            st.plotly_chart(fig_bal, use_container_width=True)
+        # --- Figure 5: סיכום תשלומים ---
+        with col_mid2:
+            st.subheader("🏆 סיכום תשלומים לפי משפחה")
+            income_df = df_filtered[df_filtered['Credit'] > 0]
+            if not income_df.empty:
+                total_per_family = income_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Credit', ascending=False)
+                fig_pay = px.bar(total_per_family, x='Beneficiary', y='Credit', text='Credit',
+                                 labels={'Credit': 'סה"כ שולם', 'Beneficiary': 'משפחה'},
+                                 color_discrete_sequence=['teal'])
+                fig_pay.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+                st.plotly_chart(fig_pay, use_container_width=True)
+            else:
+                st.info("אין הכנסות בטווח שנבחר.")
 
-        # שורה 2: תשלומי דיירים (סה"כ)
-        st.subheader("🏆 סיכום תשלומים לפי משפחה")
-        income_df = df_filtered[df_filtered['Credit'] > 0]
-        if not income_df.empty:
-            total_per_family = income_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Credit', ascending=False)
-            fig_pay = px.bar(total_per_family, x='Beneficiary', y='Credit', text='Credit',
-                             labels={'Credit': 'סה"כ שולם', 'Beneficiary': 'משפחה'},
-                             color_discrete_sequence=['teal'])
-            fig_pay.update_traces(texttemplate='%{text:.0f}', textposition='outside')
-            st.plotly_chart(fig_pay, use_container_width=True)
-        else:
-            st.info("אין הכנסות בטווח שנבחר.")
-
+        # ========================================================
         # שורה 3: פילוח הוצאות (Pie Charts)
+        # ========================================================
         st.subheader("🍰 פילוח הוצאות")
         expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
         
@@ -136,9 +168,9 @@ if uploaded_file is not None:
             with p_col1:
                 st.caption("כלל ההוצאות")
                 fig_p1 = px.pie(cat_summary, values='Debit', names='Category', hole=0.3)
-                # הסתרת אחוזים קטנים
+                # הסתרת אחוזים קטנים (פחות מ-2%)
                 fig_p1.update_traces(textposition='inside', textinfo='percent+label')
-                fig_p1.update_layout(showlegend=False)
+                fig_p1.update_layout(showlegend=True, legend=dict(orientation="h"))
                 st.plotly_chart(fig_p1, use_container_width=True)
             
             with p_col2:
@@ -148,7 +180,7 @@ if uploaded_file is not None:
                     fig_p2 = px.pie(no_gas_df, values='Debit', names='Category', hole=0.3,
                                     color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig_p2.update_traces(textposition='inside', textinfo='percent+label')
-                    fig_p2.update_layout(showlegend=False)
+                    fig_p2.update_layout(showlegend=True, legend=dict(orientation="h"))
                     st.plotly_chart(fig_p2, use_container_width=True)
                 else:
                     st.info("אין הוצאות נוספות מלבד גז.")
