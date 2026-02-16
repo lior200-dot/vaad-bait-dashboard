@@ -86,6 +86,7 @@ if uploaded_file is not None:
                                      color_discrete_map={'הכנסות': '#2ecc71', 'הוצאות': '#e74c3c'},
                                      labels={'Amount': 'סכום (ש"ח)', 'Month': 'חודש', 'Type': 'סוג'})
                 fig_inc_exp.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+                # הופך את הציר לקטגורי כדי למנוע רווחים
                 fig_inc_exp.update_xaxes(type='category')
                 st.plotly_chart(fig_inc_exp, use_container_width=True)
             else:
@@ -137,7 +138,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה (תיקון סופי לרווחים וגודל טקסט)
+        # פירוט תשלומים למשפחה (התיקון החדש - ציר כפול)
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -147,6 +148,7 @@ if uploaded_file is not None:
         if len(paying_families) > 0:
             selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
             
+            # סינון ויצירת העתק נקי של הנתונים
             family_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
@@ -155,38 +157,39 @@ if uploaded_file is not None:
             if not family_payments.empty:
                 family_payments = family_payments.sort_values('Date')
                 
-                # יצירת תווית לתאריך מדויק (יום/חודש)
-                family_payments['PaymentLabel'] = family_payments['Date'].dt.strftime('%d/%m')
+                # יצירת עמודת תאריך קצרה לתצוגה על הבר
+                family_payments['DayMonth'] = family_payments['Date'].dt.strftime('%d/%m')
                 
-                # שימוש ב-DateStr כציר ה-X מבטיח שכל תשלום יקבל בר משלו, צמוד לאחרים
+                # הטריק: שימוש ברשימה ב-X יוצר קיבוץ אוטומטי (Multicategory)
+                # זה שם את החודש למטה כקבוצה, ואת התאריכים הספציפיים מעליו
                 fig_family = px.bar(family_payments, 
-                                    x='PaymentLabel', 
+                                    x=['Month', 'DayMonth'],  # ציר כפול: חודש > יום
                                     y='Credit', 
                                     text='Credit',
-                                    color='Month', # הצבע עדיין לפי חודש כדי לשמור על הקשר
+                                    color='Month', # צביעה לפי חודש
                                     title=f'היסטוריית תשלומים - {selected_family}',
-                                    labels={'Credit': 'סכום (ש"ח)', 'PaymentLabel': 'תאריך', 'Month': 'חודש'})
+                                    labels={'Credit': 'סכום (ש"ח)', 'Month': 'חודש', 'DayMonth': 'תאריך'})
                 
-                # הגדלת הפונט בצורה משמעותית + מיקום חיצוני
+                # עיצוב המספרים והברים
                 fig_family.update_traces(
                     texttemplate='%{text:.0f}', 
                     textposition='outside',
-                    textfont_size=16, # פונט גדול וברור
-                    cliponaxis=False  # מונע מהמספר להיחתך אם הוא גבוה
+                    textfont_size=14,
+                    width=0.5 # רוחב ברים סביר כדי שלא יהיו דקים מדי
                 )
                 
-                # הגדרת הציר כקטגוריה = רווחים אחידים ויפים
-                fig_family.update_xaxes(type='category', title_text="תאריך תשלום")
-                
-                # סידור כללי של הגרף
+                # עיצוב הציר והמרווחים
                 fig_family.update_layout(
-                    bargap=0.3, # רווח סביר בין העמודות
-                    yaxis=dict(title='סכום (ש"ח)', showgrid=True),
-                    showlegend=True # החזרתי את המקרא כדי שיהיה ברור איזה צבע זה איזה חודש
+                    showlegend=False,       # אין צורך במקרא כי הכל ברור
+                    bargap=0.2,             # רווח בין ימים
+                    bargroupgap=0.3,        # רווח גדול יותר בין חודשים
+                    xaxis_title="חודש ותאריך תשלום",
+                    yaxis_title='סכום (ש"ח)'
                 )
                 
                 st.plotly_chart(fig_family, use_container_width=True)
 
+            # טבלה
             st.caption("פירוט בטבלה:")
             display_table = family_payments[['Date', 'Credit', 'Details', 'Action']].copy()
             display_table['Date'] = display_table['Date'].dt.strftime('%d/%m/%Y')
@@ -200,7 +203,7 @@ if uploaded_file is not None:
             st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
 
         # ========================================================
-        # פילוח הוצאות
+        # פילוח הוצאות (כללי)
         # ========================================================
         st.markdown("---")
         st.subheader("🍰 פילוח הוצאות (כללי)")
