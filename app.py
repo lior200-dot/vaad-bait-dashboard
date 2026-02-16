@@ -32,8 +32,8 @@ def load_data(uploaded_file):
     df['Action'] = df['Action'].fillna('').astype(str)
     df['Beneficiary'] = df['Beneficiary'].fillna('').astype(str)
     
-    # עמודת חודש לשימוש בגרפים
-    df['Month'] = df['Date'].dt.to_period('M').astype(str)
+    # עמודת חודש לשימוש בגרפים - פורמט חודש/שנה
+    df['Month'] = df['Date'].dt.strftime('%m/%Y')
     
     return df
 
@@ -76,18 +76,21 @@ if uploaded_file is not None:
         with col_top1:
             st.subheader("⚖️ הכנסות מול הוצאות (חודשי)")
             if not df_filtered.empty:
-                monthly_summary = df_filtered.groupby('Month')[['Credit', 'Debit']].sum().reset_index()
-                monthly_melt = monthly_summary.melt(id_vars='Month', value_vars=['Credit', 'Debit'], 
-                                                    var_name='Type', value_name='Amount')
+                # מיון נכון של חודשים (לפי תאריך אמיתי ולא טקסט)
+                monthly_summary = df_filtered.copy()
+                monthly_summary['MonthDate'] = monthly_summary['Date'].dt.to_period('M')
+                grouped = monthly_summary.groupby('MonthDate')[['Credit', 'Debit']].sum().reset_index()
+                grouped['MonthStr'] = grouped['MonthDate'].dt.strftime('%m/%Y')
+                
+                monthly_melt = grouped.melt(id_vars='MonthStr', value_vars=['Credit', 'Debit'], 
+                                            var_name='Type', value_name='Amount')
                 monthly_melt['Type'] = monthly_melt['Type'].replace({'Credit': 'הכנסות', 'Debit': 'הוצאות'})
                 
-                fig_inc_exp = px.bar(monthly_melt, x='Month', y='Amount', color='Type', barmode='group',
+                fig_inc_exp = px.bar(monthly_melt, x='MonthStr', y='Amount', color='Type', barmode='group',
                                      text='Amount',
                                      color_discrete_map={'הכנסות': '#2ecc71', 'הוצאות': '#e74c3c'},
-                                     labels={'Amount': 'סכום (ש"ח)', 'Month': 'חודש', 'Type': 'סוג'})
+                                     labels={'Amount': 'סכום (ש"ח)', 'MonthStr': 'חודש', 'Type': 'סוג'})
                 fig_inc_exp.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
-                # הופך את הציר לקטגורי כדי למנוע רווחים
-                fig_inc_exp.update_xaxes(type='category')
                 st.plotly_chart(fig_inc_exp, use_container_width=True)
             else:
                 st.info("אין נתונים להצגה.")
@@ -119,7 +122,6 @@ if uploaded_file is not None:
                                   labels={'Debit': 'סכום (ש"ח)', 'Month': 'חודש'},
                                   color_discrete_sequence=['orange'])
                 fig_elec.update_traces(texttemplate='%{text:.0f}', textposition='outside')
-                fig_elec.update_xaxes(type='category')
                 st.plotly_chart(fig_elec, use_container_width=True)
             else:
                 st.info("לא נמצאו הוצאות חשמל בטווח זה.")
@@ -138,7 +140,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה (תיקון: בר ייחודי לכל תשלום)
+        # פירוט תשלומים למשפחה (תיקון כפילויות + פורמט תאריך)
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -157,26 +159,30 @@ if uploaded_file is not None:
                 # מיון כרונולוגי
                 family_payments = family_payments.sort_values('Date')
                 
-                # --- הפתרון הסופי לבעיית החפיפה ---
-                # אנחנו יוצרים "שם" ייחודי לכל בר שכולל את התאריך והסכום.
-                # מכיוון שלכל תשלום יש שם אחר, פלוטלי חייב לצייר אותם בנפרד.
-                # אנחנו משתמשים באינדקס כדי להבטיח ייחודיות גם אם יש שני תשלומים זהים באותו יום.
-                family_payments['BarLabel'] = family_payments.apply(
-                    lambda x: f"{x['Date'].strftime('%d/%m')}\n({x['Credit']:.0f})", axis=1
-                )
+                # יצירת מפתח ייחודי שכולל את האינדקס המקורי
+                # זה הפתרון לבעיית הכפילות - כל שורה מקבלת זהות משלה
+                family_payments['UniqueID'] = family_payments.index.astype(str)
                 
-                # כדי לשמור על הסדר הכרונולוגי בגרף ולא לפי א-ב:
-                family_payments = family_payments.reset_index()
+                # יצירת תווית לתאריך מדויק (יום/חודש) להצגה בריחוף
+                family_payments['FullDate'] = family_payments['Date'].dt.strftime('%d/%m/%Y')
                 
+                # הגרף: 
+                # x = Month (כדי לקבץ לפי חודש/שנה)
+                # y = Credit (הסכום)
+                # צבע = Month (להפרדה ויזואלית)
                 fig_family = px.bar(
                     family_payments, 
-                    x='BarLabel',       # ציר ה-X הוא התווית הייחודית שיצרנו
+                    x='Month',          # מציג חודש/שנה (02/2026)
                     y='Credit', 
                     text='Credit',
-                    color='Month',      # הצבע עדיין לפי החודש
+                    color='Month',      # צבע שונה לכל חודש
+                    hover_data={'FullDate': True, 'Month': False, 'UniqueID': False},
                     title=f'היסטוריית תשלומים - {selected_family}',
-                    labels={'Credit': 'סכום (ש"ח)', 'BarLabel': 'תאריך תשלום'}
+                    labels={'Credit': 'סכום (ש"ח)', 'Month': 'חודש', 'FullDate': 'תאריך מלא'}
                 )
+                
+                # group - גורם לברים עם אותו חודש לעמוד אחד ליד השני
+                fig_family.update_layout(barmode='group')
                 
                 # עיצוב המספרים והטקסט
                 fig_family.update_traces(
@@ -186,12 +192,13 @@ if uploaded_file is not None:
                 )
                 
                 # הגדרות ציר ועיצוב כללי
-                fig_family.update_xaxes(type='category', title_text="תאריך") # מבטיח שזה לא יתפרש כזמן
+                fig_family.update_xaxes(type='category', title_text="חודש ושנה")
                 fig_family.update_yaxes(title_text='סכום (ש"ח)')
                 
                 fig_family.update_layout(
-                    showlegend=True,    # מציג מקרא צבעים לפי חודש
-                    bargap=0.2          # רווח בין ברים
+                    showlegend=False,   # אין צורך במקרא
+                    bargap=0.2,         # רווח בין חודשים
+                    bargroupgap=0.05    # רווח קטנטן בין ברים באותו חודש
                 )
                 
                 st.plotly_chart(fig_family, use_container_width=True)
@@ -247,7 +254,9 @@ if uploaded_file is not None:
         st.markdown("---")
         st.subheader("📅 פירוט חודשי ממוקד")
         
-        available_months = sorted(df_filtered['Month'].unique(), reverse=True)
+        # מיון חודשים נכון (לפי זמן ולא לפי טקסט)
+        available_months_dt = df_filtered['Date'].dt.to_period('M').unique().sort_values(ascending=False)
+        available_months = [m.strftime('%m/%Y') for m in available_months_dt]
         
         if len(available_months) > 0:
             selected_month = st.selectbox("בחר חודש לצפייה בפירוט:", available_months)
