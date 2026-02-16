@@ -142,8 +142,50 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
+        # חלק חדש: פירוט תשלומים לפי בחירת משפחה
+        # ========================================================
+        st.markdown("---")
+        st.subheader("🔎 פירוט תשלומים למשפחה")
+        
+        # יצירת רשימת משפחות ששילמו (מתוך הנתונים המסוננים)
+        paying_families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
+        
+        if len(paying_families) > 0:
+            # תיבת בחירה (Dropdown)
+            selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
+            
+            # סינון הנתונים לפי המשפחה שנבחרה
+            family_payments = df_filtered[
+                (df_filtered['Beneficiary'] == selected_family) & 
+                (df_filtered['Credit'] > 0)
+            ].copy()
+            
+            # הצגת סטטיסטיקה קצרה
+            total_paid = family_payments['Credit'].sum()
+            st.write(f"**סה\"כ שולם ע\"י {selected_family} בתקופה זו:** {total_paid:,.0f} ש\"ח")
+            
+            # עיצוב הטבלה להצגה
+            display_table = family_payments[['Date', 'Credit', 'Details', 'Action']].copy()
+            # פירמוט התאריך לתצוגה ישראלית
+            display_table['Date'] = display_table['Date'].dt.strftime('%d/%m/%Y')
+            
+            # שינוי שמות עמודות לעברית
+            display_table = display_table.rename(columns={
+                'Date': 'תאריך',
+                'Credit': 'סכום (ש"ח)',
+                'Details': 'פרטים',
+                'Action': 'פעולה'
+            })
+            
+            # הצגת הטבלה
+            st.dataframe(display_table, use_container_width=True, hide_index=True)
+        else:
+            st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
+
+        # ========================================================
         # שורה 3: פילוח הוצאות (Pie Charts)
         # ========================================================
+        st.markdown("---")
         st.subheader("🍰 פילוח הוצאות")
         expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
         
