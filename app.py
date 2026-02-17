@@ -7,6 +7,10 @@ from datetime import datetime
 st.set_page_config(page_title="דשבורד ועד בית", layout="wide")
 st.title("🏠 דשבורד ניהול כספי - ועד בית")
 
+# --- אתחול Session State לניהול איחוד משפחות ---
+if 'merge_map' not in st.session_state:
+    st.session_state['merge_map'] = {}
+
 # --- פונקציית טעינת נתונים ---
 def load_data(uploaded_file):
     try:
@@ -64,7 +68,51 @@ if uploaded_file is not None:
     df = load_data(uploaded_file)
     
     if not df.empty:
-        # --- בחירת טווח תאריכים ---
+        # ==========================================
+        # מנגנון איחוד משפחות (חדש!)
+        # ==========================================
+        st.sidebar.markdown("---")
+        with st.sidebar.expander("🔗 ניהול ואיחוד שמות משפחה", expanded=False):
+            st.caption("כאן ניתן לאחד מספר שמות תחת משפחה אחת (למשל: בעל ואישה).")
+            
+            # קבלת כל השמות הקיימים (לפני האיחוד)
+            all_beneficiaries = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
+            
+            # טופס הוספת איחוד
+            with st.form("merge_form"):
+                new_group_name = st.text_input("שם מאוחד חדש (למשל: משפחת כהן)")
+                selected_names = st.multiselect("בחר שמות לאיחוד:", all_beneficiaries)
+                submit_merge = st.form_submit_button("בצע איחוד")
+            
+            if submit_merge and new_group_name and selected_names:
+                for name in selected_names:
+                    st.session_state['merge_map'][name] = new_group_name
+                st.success(f"אוחדו {len(selected_names)} שמות ל-'{new_group_name}'")
+                st.rerun()
+
+            # הצגת האיחודים הפעילים ואפשרות איפוס
+            if st.session_state['merge_map']:
+                st.write("📋 **איחודים פעילים:**")
+                # היפוך המילון כדי להציג בצורה נוחה
+                grouped_view = {}
+                for k, v in st.session_state['merge_map'].items():
+                    grouped_view.setdefault(v, []).append(k)
+                
+                for group, members in grouped_view.items():
+                    st.text(f"{group}: {', '.join(members)}")
+                
+                if st.button("🗑️ מחק את כל האיחודים"):
+                    st.session_state['merge_map'] = {}
+                    st.rerun()
+
+        # החלת האיחוד על הדאטה-פריים הראשי
+        if st.session_state['merge_map']:
+            df['Beneficiary'] = df['Beneficiary'].replace(st.session_state['merge_map'])
+
+        # ==========================================
+        # המשך הקוד הרגיל (סינונים וגרפים)
+        # ==========================================
+        st.sidebar.markdown("---")
         st.sidebar.header("סינון תאריכים")
         min_date = df['Date'].min().date()
         max_date = df['Date'].max().date()
@@ -126,10 +174,8 @@ if uploaded_file is not None:
             
             electric_df = df_filtered[is_electric & (df_filtered['Debit'] > 0)]
             if not electric_df.empty:
-                # קיבוץ לפי חודש
                 monthly_electric = electric_df.groupby('Month')['Debit'].sum().reset_index()
-                
-                # --- תיקון המיון: הוספת עמודת תאריך ומיון לפיה ---
+                # מיון כרונולוגי
                 monthly_electric['SortDate'] = pd.to_datetime(monthly_electric['Month'], format='%m/%Y')
                 monthly_electric = monthly_electric.sort_values('SortDate')
                 
@@ -145,7 +191,6 @@ if uploaded_file is not None:
             st.subheader("🏆 סיכום תשלומים לפי משפחה")
             income_df = df_filtered[df_filtered['Credit'] > 0]
             if not income_df.empty:
-                # מיון לפי א-ב של שם המשפחה
                 total_per_family = income_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Beneficiary', ascending=True)
                 fig_pay = px.bar(total_per_family, x='Beneficiary', y='Credit', text='Credit',
                                  labels={'Credit': 'סה"כ שולם', 'Beneficiary': 'משפחה'},
@@ -156,11 +201,12 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה - עם האופציה לבחירה
+        # פירוט תשלומים למשפחה
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
         
+        # רשימת המשפחות כבר כוללת את האיחודים שעשינו למעלה
         paying_families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
         
         if len(paying_families) > 0:
@@ -168,22 +214,19 @@ if uploaded_file is not None:
             with c1:
                 selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
             with c2:
-                # הוספת ה-Checkbox לשליטה על התצוגה
-                st.write("") # ריווח
+                st.write("") 
                 st.write("")
                 show_missing_months = st.checkbox("הצג גם חודשים ללא תשלום בגרף", value=False)
             
-            # 1. שליפת התשלומים בפועל (בסיס לטבלה ולגרף הפשוט)
+            # שליפת הנתונים (השמות כבר מאוחדים ב-df_filtered)
             actual_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
             ].copy().sort_values('Date')
             
-            # הכנת הנתונים לגרף - תלוי בבחירת המשתמש
             graph_data = []
             
             if show_missing_months:
-                # --- אופציה ב': הצגת כל החודשים (כולל ריקים) ---
                 normalized_start = start_date.replace(day=1)
                 full_date_range = pd.date_range(start=normalized_start, end=end_date, freq='MS')
                 
@@ -201,7 +244,6 @@ if uploaded_file is not None:
                                 'FullDate': row['Date'].strftime('%d/%m/%Y')
                             })
                     else:
-                        # חודש ריק
                         graph_data.append({
                             'Date': date_point,
                             'Month': month_str,
@@ -210,7 +252,6 @@ if uploaded_file is not None:
                             'FullDate': ''
                         })
             else:
-                # --- אופציה א' (ברירת מחדל): רק מה ששולם ---
                 for _, row in actual_payments.iterrows():
                     graph_data.append({
                         'Date': row['Date'],
@@ -220,13 +261,11 @@ if uploaded_file is not None:
                         'FullDate': row['Date'].strftime('%d/%m/%Y')
                     })
 
-            # יצירת ה-DataFrame לגרף
             df_graph = pd.DataFrame(graph_data)
             
             if not df_graph.empty:
                 df_graph['RowID'] = range(len(df_graph))
                 
-                # יצירת הגרף
                 fig_family = px.bar(
                     df_graph, 
                     x='RowID', 
@@ -238,7 +277,6 @@ if uploaded_file is not None:
                     labels={'Credit': 'סכום (ש"ח)', 'FullDate': 'תאריך'}
                 )
                 
-                # עיצוב ציר X
                 fig_family.update_layout(
                     xaxis=dict(
                         tickmode='array',
@@ -258,13 +296,11 @@ if uploaded_file is not None:
                     marker_line_color='black'
                 )
                 
-                # הסתרת ה-0 אם מציגים חודשים ריקים
                 if show_missing_months:
                      fig_family.for_each_trace(lambda t: t.update(text=[v if v > 0 else "" for v in t.y]))
 
                 st.plotly_chart(fig_family, use_container_width=True)
 
-            # --- הטבלה: מציגה תמיד רק את התשלומים בפועל ---
             st.caption("פירוט תשלומים שבוצעו:")
             table_df = actual_payments[['Date', 'Credit', 'Details', 'Action']].copy()
             table_df['Date'] = table_df['Date'].dt.strftime('%d/%m/%Y')
