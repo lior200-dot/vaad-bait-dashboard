@@ -9,9 +9,15 @@ st.title("🏠 דשבורד ניהול כספי - ועד בית")
 
 # --- פונקציית טעינת נתונים ---
 def load_data(uploaded_file):
-    df = pd.read_excel(uploaded_file, skiprows=4)
-    cols = df.columns.tolist()
-    if len(cols) >= 9:
+    try:
+        df = pd.read_excel(uploaded_file, skiprows=4)
+        cols = df.columns.tolist()
+        
+        # וידוא שיש מספיק עמודות
+        if len(cols) < 9:
+            st.error("קובץ האקסל לא תואם למבנה המצופה (חסרות עמודות).")
+            return pd.DataFrame()
+
         mapping = {
             cols[0]: 'Date',
             cols[1]: 'Action',
@@ -22,20 +28,24 @@ def load_data(uploaded_file):
             cols[8]: 'Beneficiary'
         }
         df = df.rename(columns=mapping)
-    
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    df['Credit'] = pd.to_numeric(df['Credit'], errors='coerce').fillna(0)
-    df['Debit'] = pd.to_numeric(df['Debit'], errors='coerce').fillna(0)
-    df['Balance'] = pd.to_numeric(df['Balance'], errors='coerce').fillna(0)
-    
-    df['Details'] = df['Details'].fillna('').astype(str)
-    df['Action'] = df['Action'].fillna('').astype(str)
-    df['Beneficiary'] = df['Beneficiary'].fillna('').astype(str)
-    
-    # עמודת חודש לשימוש בגרפים - פורמט חודש/שנה
-    df['Month'] = df['Date'].dt.strftime('%m/%Y')
-    
-    return df
+        
+        # המרות סוגים
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Credit'] = pd.to_numeric(df['Credit'], errors='coerce').fillna(0)
+        df['Debit'] = pd.to_numeric(df['Debit'], errors='coerce').fillna(0)
+        df['Balance'] = pd.to_numeric(df['Balance'], errors='coerce').fillna(0)
+        
+        df['Details'] = df['Details'].fillna('').astype(str)
+        df['Action'] = df['Action'].fillna('').astype(str)
+        df['Beneficiary'] = df['Beneficiary'].fillna('').astype(str)
+        
+        # עמודת חודש לשימוש בגרפים - פורמט חודש/שנה
+        df['Month'] = df['Date'].dt.strftime('%m/%Y')
+        
+        return df
+    except Exception as e:
+        st.error(f"שגיאה בטעינת הנתונים: {e}")
+        return pd.DataFrame()
 
 # --- פונקציית עזר לקטגוריזציה ---
 def categorize_expense(row):
@@ -51,9 +61,9 @@ st.sidebar.header("העלאת נתונים")
 uploaded_file = st.sidebar.file_uploader("בחר קובץ אקסל מהבנק", type=['xlsx', 'xls'])
 
 if uploaded_file is not None:
-    try:
-        df = load_data(uploaded_file)
-        
+    df = load_data(uploaded_file)
+    
+    if not df.empty:
         # --- בחירת טווח תאריכים ---
         st.sidebar.header("סינון תאריכים")
         min_date = df['Date'].min().date()
@@ -139,7 +149,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה - מתוקן ורובוסטי
+        # פירוט תשלומים למשפחה - התיקון הקריטי
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -155,45 +165,46 @@ if uploaded_file is not None:
                 (df_filtered['Credit'] > 0)
             ].copy()
             
-            # 2. יצירת ציר זמן מלא (מתחילת החודש של תאריך ההתחלה ועד סוף תאריך הסיום)
-            # מנרמלים את התאריכים ליום ה-1 בחודש כדי למנוע פספוסים
+            # 2. יצירת רשימה אחידה
             normalized_start = start_date.replace(day=1)
             full_date_range = pd.date_range(start=normalized_start, end=end_date, freq='MS') 
             
             combined_rows = []
             
-            # 3. בניית הרשימה
             for date_point in full_date_range:
                 month_str = date_point.strftime('%m/%Y')
                 
-                # מציאת תשלומים בחודש זה
+                # מציאת תשלומים קיימים בחודש זה
                 payments_in_month = actual_payments[actual_payments['Month'] == month_str]
                 
                 if not payments_in_month.empty:
-                    # המרה למילון כדי למנוע בעיות טיפוסים ב-DataFrame
+                    # הוספת שורות קיימות - בניה ידנית כדי להבטיח שהמפתחות זהים
                     for _, row in payments_in_month.iterrows():
-                        row_dict = row.to_dict()
-                        # מוודאים שהתאריך נשמר
-                        row_dict['Date'] = row['Date'] 
-                        combined_rows.append(row_dict)
+                        combined_rows.append({
+                            'Date': row['Date'],
+                            'Month': month_str,
+                            'Credit': row['Credit'],
+                            'Details': row['Details'],
+                            'Action': row['Action'],
+                            'Beneficiary': selected_family,
+                            'Type': 'Paid' # סימון פנימי
+                        })
                 else:
-                    # שורת דמה
+                    # הוספת שורת דמה לחודש ריק
                     combined_rows.append({
                         'Date': date_point,
-                        'Credit': 0,
                         'Month': month_str,
+                        'Credit': 0,
                         'Details': '❌ לא שולם',
                         'Action': '-',
                         'Beneficiary': selected_family,
-                        'Debit': 0,
-                        'Balance': 0
+                        'Type': 'Empty' # סימון פנימי
                     })
             
-            # יצירת הדאטה-פריים הסופי
-            if combined_rows:
-                display_df = pd.DataFrame(combined_rows)
-                # וידוא שעמודת התאריך היא מסוג תאריך
-                display_df['Date'] = pd.to_datetime(display_df['Date'])
+            # יצירת DataFrame לתצוגה
+            display_df = pd.DataFrame(combined_rows)
+            
+            if not display_df.empty:
                 display_df['RowID'] = range(len(display_df))
                 display_df['FullDate'] = display_df['Date'].dt.strftime('%d/%m/%Y')
                 
@@ -209,7 +220,6 @@ if uploaded_file is not None:
                     labels={'Credit': 'סכום (ש"ח)', 'FullDate': 'תאריך'}
                 )
                 
-                # עיצוב ציר X
                 fig_family.update_layout(
                     xaxis=dict(
                         tickmode='array',
@@ -221,7 +231,6 @@ if uploaded_file is not None:
                     bargap=0.3
                 )
                 
-                # עיצוב טקסט
                 fig_family.update_traces(
                     texttemplate='%{text:,.0f}', 
                     textposition='outside',
@@ -229,7 +238,7 @@ if uploaded_file is not None:
                     marker_line_width=1,
                     marker_line_color='black'
                 )
-                # הסתרת ה-0 בגרף
+                # הסתרת האפסים בגרף
                 fig_family.for_each_trace(lambda t: t.update(text=[v if v > 0 else "" for v in t.y]))
 
                 st.plotly_chart(fig_family, use_container_width=True)
@@ -238,7 +247,9 @@ if uploaded_file is not None:
                 st.caption("פירוט בטבלה (אדום = לא שולם):")
                 
                 def highlight_zeros(row):
-                    if row['Credit'] == 0:
+                    # שימוש ב-safe lookup עם .get למקרה חירום, למרות שעכשיו בנינו את זה טוב
+                    val = row.get('Credit', 0)
+                    if val == 0:
                         return ['background-color: #ffcccc; color: #990000'] * len(row)
                     return [''] * len(row)
 
@@ -251,7 +262,7 @@ if uploaded_file is not None:
                 total_paid = actual_payments['Credit'].sum()
                 st.write(f"**סה\"כ שולם בפועל בתקופה זו:** {total_paid:,.0f} ש\"ח")
             else:
-                 st.info("לא הצלחנו לייצר את נתוני התצוגה.")
+                 st.info("לא נמצאו נתונים להצגה.")
 
         else:
             st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
@@ -334,10 +345,6 @@ if uploaded_file is not None:
                     st.info("אין הוצאות בחודש זה.")
         else:
             st.info("אין נתונים זמינים לבחירת חודשים.")
-
-    except Exception as e:
-        st.error(f"שגיאה בעיבוד הקובץ: {e}")
-        st.write("נא לוודא שקובץ האקסל הוא בפורמט התקין מהבנק.")
 
 else:
     st.info("אנא העלה קובץ אקסל כדי להתחיל.")
