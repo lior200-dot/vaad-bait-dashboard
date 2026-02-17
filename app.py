@@ -81,8 +81,6 @@ if uploaded_file is not None:
             # --- טופס שמתנקה אוטומטית ---
             with st.form("merge_form", clear_on_submit=True):
                 new_group_name = st.text_input("שם המשפחה המאוחד (למשל: משפחת פולק)")
-                
-                # השימוש ברשימה המסוננת (available_beneficiaries)
                 selected_names = st.multiselect("בחר את השמות לאיחוד:", available_beneficiaries)
                 
                 submitted = st.form_submit_button("שמור והוסף משפחה נוספת")
@@ -92,7 +90,7 @@ if uploaded_file is not None:
                         for name in selected_names:
                             st.session_state['merge_map'][name] = new_group_name
                         st.success(f"נשמר: {new_group_name}")
-                        st.rerun() # רענון כדי לעדכן את הרשימה המסוננת מיד
+                        st.rerun()
                     else:
                         st.warning("נא להזין שם וגם לבחור אנשים לאיחוד.")
 
@@ -111,7 +109,6 @@ if uploaded_file is not None:
                     with st.expander(f"🔹 {group}", expanded=False):
                         st.write(", ".join(members))
                 
-                # מחיקת קבוצה
                 group_to_delete = st.selectbox("בחר קבוצה למחיקה (השמות יחזרו לרשימה)", ["- בחר -"] + list(grouped_view.keys()))
                 if group_to_delete != "- בחר -":
                     if st.button(f"מחק את '{group_to_delete}'"):
@@ -124,7 +121,7 @@ if uploaded_file is not None:
                     st.session_state['merge_map'] = {}
                     st.rerun()
 
-        # החלת האיחוד על הדאטה-פריים הראשי
+        # החלת האיחוד
         if st.session_state['merge_map']:
             df['Beneficiary'] = df['Beneficiary'].replace(st.session_state['merge_map'])
 
@@ -272,6 +269,9 @@ if uploaded_file is not None:
             if not df_graph.empty:
                 df_graph['RowID'] = range(len(df_graph))
                 
+                # --- תיקון: מציאת הערך המקסימלי כדי להגדיל את הגרף ---
+                max_credit = df_graph['Credit'].max() if not df_graph.empty else 100
+                
                 fig_family = px.bar(
                     df_graph, 
                     x='RowID', 
@@ -290,6 +290,10 @@ if uploaded_file is not None:
                         ticktext=df_graph['Month'],
                         title_text="חודש ושנה"
                     ),
+                    # כאן התיקון: מוסיף 20% גובה לציר ה-Y כדי שהטקסט לא ייחתך
+                    yaxis=dict(
+                        range=[0, max_credit * 1.2]
+                    ),
                     showlegend=False,
                     bargap=0.3
                 )
@@ -297,6 +301,7 @@ if uploaded_file is not None:
                 fig_family.update_traces(
                     texttemplate='%{text:,.0f}', 
                     textposition='outside',
+                    cliponaxis=False, # מונע חיתוך טקסט שחורג מהציר
                     textfont=dict(size=14, color='black'),
                     marker_line_width=1,
                     marker_line_color='black'
