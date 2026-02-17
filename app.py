@@ -69,48 +69,70 @@ if uploaded_file is not None:
     
     if not df.empty:
         # ==========================================
-        # מנגנון איחוד משפחות (חדש!)
+        # מנגנון איחוד משפחות (משופר)
         # ==========================================
         st.sidebar.markdown("---")
-        with st.sidebar.expander("🔗 ניהול ואיחוד שמות משפחה", expanded=False):
-            st.caption("כאן ניתן לאחד מספר שמות תחת משפחה אחת (למשל: בעל ואישה).")
+        with st.sidebar.expander("🔗 איחוד שמות ומשפחות", expanded=True):
+            st.caption("הגדר קבוצות לאיחוד. לאחר לחיצה על 'שמור', הטופס יתנקה ותוכל להוסיף את המשפחה הבאה.")
             
-            # קבלת כל השמות הקיימים (לפני האיחוד)
+            # רשימת כל השמות המקוריים בקובץ
             all_beneficiaries = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
             
-            # טופס הוספת איחוד
-            with st.form("merge_form"):
-                new_group_name = st.text_input("שם מאוחד חדש (למשל: משפחת כהן)")
-                selected_names = st.multiselect("בחר שמות לאיחוד:", all_beneficiaries)
-                submit_merge = st.form_submit_button("בצע איחוד")
-            
-            if submit_merge and new_group_name and selected_names:
-                for name in selected_names:
-                    st.session_state['merge_map'][name] = new_group_name
-                st.success(f"אוחדו {len(selected_names)} שמות ל-'{new_group_name}'")
-                st.rerun()
+            # --- טופס שמתנקה אוטומטית אחרי שליחה (clear_on_submit=True) ---
+            with st.form("merge_form", clear_on_submit=True):
+                new_group_name = st.text_input("שם המשפחה המאוחד (למשל: משפחת פולק)")
+                selected_names = st.multiselect("בחר את השמות לאיחוד:", all_beneficiaries)
+                
+                submitted = st.form_submit_button("שמור והוסף משפחה נוספת")
+                
+                if submitted:
+                    if new_group_name and selected_names:
+                        # שמירה בזיכרון
+                        for name in selected_names:
+                            st.session_state['merge_map'][name] = new_group_name
+                        st.success(f"נשמר: {new_group_name}")
+                    else:
+                        st.warning("נא להזין שם וגם לבחור אנשים לאיחוד.")
 
-            # הצגת האיחודים הפעילים ואפשרות איפוס
+            # --- תצוגת הקבוצות הפעילות ---
             if st.session_state['merge_map']:
-                st.write("📋 **איחודים פעילים:**")
-                # היפוך המילון כדי להציג בצורה נוחה
+                st.markdown("---")
+                st.write("📋 **קבוצות פעילות:**")
+                
+                # ארגון הנתונים לתצוגה נוחה
                 grouped_view = {}
-                for k, v in st.session_state['merge_map'].items():
-                    grouped_view.setdefault(v, []).append(k)
+                for original_name, new_name in st.session_state['merge_map'].items():
+                    if new_name not in grouped_view:
+                        grouped_view[new_name] = []
+                    grouped_view[new_name].append(original_name)
                 
+                # הצגת רשימה
                 for group, members in grouped_view.items():
-                    st.text(f"{group}: {', '.join(members)}")
+                    with st.expander(f"🔹 {group}", expanded=False):
+                        st.write(", ".join(members))
                 
-                if st.button("🗑️ מחק את כל האיחודים"):
+                # מחיקת איחוד ספציפי
+                st.write("**מחיקת קבוצה:**")
+                group_to_delete = st.selectbox("בחר קבוצה למחיקה", ["- בחר -"] + list(grouped_view.keys()))
+                if group_to_delete != "- בחר -":
+                    if st.button(f"מחק את '{group_to_delete}'"):
+                        # מחיקת כל המפתחות ששייכים לקבוצה הזו
+                        keys_to_remove = [k for k, v in st.session_state['merge_map'].items() if v == group_to_delete]
+                        for k in keys_to_remove:
+                            del st.session_state['merge_map'][k]
+                        st.rerun()
+
+                if st.button("🗑️ אפס את כל האיחודים"):
                     st.session_state['merge_map'] = {}
                     st.rerun()
 
         # החלת האיחוד על הדאטה-פריים הראשי
+        # זה קורה אוטומטית לכל הקבוצות שהוגדרו ב-merge_map
         if st.session_state['merge_map']:
             df['Beneficiary'] = df['Beneficiary'].replace(st.session_state['merge_map'])
 
         # ==========================================
-        # המשך הקוד הרגיל (סינונים וגרפים)
+        # המשך הקוד הרגיל
         # ==========================================
         st.sidebar.markdown("---")
         st.sidebar.header("סינון תאריכים")
@@ -120,7 +142,6 @@ if uploaded_file is not None:
         start_date = st.sidebar.date_input("תאריך התחלה", min_date)
         end_date = st.sidebar.date_input("תאריך סיום", max_date)
         
-        # סינון הדאטה
         mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
         df_filtered = df.loc[mask]
         
@@ -175,7 +196,6 @@ if uploaded_file is not None:
             electric_df = df_filtered[is_electric & (df_filtered['Debit'] > 0)]
             if not electric_df.empty:
                 monthly_electric = electric_df.groupby('Month')['Debit'].sum().reset_index()
-                # מיון כרונולוגי
                 monthly_electric['SortDate'] = pd.to_datetime(monthly_electric['Month'], format='%m/%Y')
                 monthly_electric = monthly_electric.sort_values('SortDate')
                 
@@ -206,7 +226,6 @@ if uploaded_file is not None:
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
         
-        # רשימת המשפחות כבר כוללת את האיחודים שעשינו למעלה
         paying_families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
         
         if len(paying_families) > 0:
@@ -218,7 +237,7 @@ if uploaded_file is not None:
                 st.write("")
                 show_missing_months = st.checkbox("הצג גם חודשים ללא תשלום בגרף", value=False)
             
-            # שליפת הנתונים (השמות כבר מאוחדים ב-df_filtered)
+            # הנתונים כאן כבר מושפעים מהאיחוד (df_filtered כבר מעודכן)
             actual_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
