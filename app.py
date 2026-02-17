@@ -5,7 +5,7 @@ from datetime import datetime
 
 # --- הגדרות עמוד ---
 st.set_page_config(page_title="דשבורד ועד בית", layout="wide")
-st.title("🏠 דשבורד ניהול כספי - ועד בית")
+st.title("🏠 ניהול כספי - ועד בית אור החיים 5")
 
 # --- פונקציית טעינת נתונים ---
 def load_data(uploaded_file):
@@ -289,3 +289,4 @@ if uploaded_file is not None:
 
 else:
     st.info("אנא העלה קובץ אקסל כדי להתחיל.")
+
