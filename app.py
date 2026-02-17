@@ -5,7 +5,7 @@ from datetime import datetime
 
 # --- הגדרות עמוד ---
 st.set_page_config(page_title="דשבורד ועד בית", layout="wide")
-st.title("🏠 ניהול כספי - ועד בית אור החיים 5")
+st.title("🏠 דשבורד ניהול כספי - ועד בית")
 
 # --- פונקציית טעינת נתונים ---
 def load_data(uploaded_file):
@@ -126,7 +126,13 @@ if uploaded_file is not None:
             
             electric_df = df_filtered[is_electric & (df_filtered['Debit'] > 0)]
             if not electric_df.empty:
+                # קיבוץ לפי חודש
                 monthly_electric = electric_df.groupby('Month')['Debit'].sum().reset_index()
+                
+                # --- תיקון המיון: הוספת עמודת תאריך ומיון לפיה ---
+                monthly_electric['SortDate'] = pd.to_datetime(monthly_electric['Month'], format='%m/%Y')
+                monthly_electric = monthly_electric.sort_values('SortDate')
+                
                 fig_elec = px.bar(monthly_electric, x='Month', y='Debit', text='Debit',
                                   labels={'Debit': 'סכום (ש"ח)', 'Month': 'חודש'},
                                   color_discrete_sequence=['orange'])
@@ -139,6 +145,7 @@ if uploaded_file is not None:
             st.subheader("🏆 סיכום תשלומים לפי משפחה")
             income_df = df_filtered[df_filtered['Credit'] > 0]
             if not income_df.empty:
+                # מיון לפי א-ב של שם המשפחה
                 total_per_family = income_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Beneficiary', ascending=True)
                 fig_pay = px.bar(total_per_family, x='Beneficiary', y='Credit', text='Credit',
                                  labels={'Credit': 'סה"כ שולם', 'Beneficiary': 'משפחה'},
@@ -352,4 +359,3 @@ if uploaded_file is not None:
 
 else:
     st.info("אנא העלה קובץ אקסל כדי להתחיל.")
-
