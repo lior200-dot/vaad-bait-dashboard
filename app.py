@@ -17,7 +17,6 @@ def load_data(uploaded_file):
         df = pd.read_excel(uploaded_file, skiprows=4)
         cols = df.columns.tolist()
         
-        # וידוא שיש מספיק עמודות
         if len(cols) < 9:
             st.error("קובץ האקסל לא תואם למבנה המצופה (חסרות עמודות).")
             return pd.DataFrame()
@@ -33,7 +32,6 @@ def load_data(uploaded_file):
         }
         df = df.rename(columns=mapping)
         
-        # המרות סוגים
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df['Credit'] = pd.to_numeric(df['Credit'], errors='coerce').fillna(0)
         df['Debit'] = pd.to_numeric(df['Debit'], errors='coerce').fillna(0)
@@ -43,7 +41,6 @@ def load_data(uploaded_file):
         df['Action'] = df['Action'].fillna('').astype(str)
         df['Beneficiary'] = df['Beneficiary'].fillna('').astype(str)
         
-        # עמודת חודש לשימוש בגרפים - פורמט חודש/שנה
         df['Month'] = df['Date'].dt.strftime('%m/%Y')
         
         return df
@@ -69,28 +66,33 @@ if uploaded_file is not None:
     
     if not df.empty:
         # ==========================================
-        # מנגנון איחוד משפחות (משופר)
+        # מנגנון איחוד משפחות (עם סינון חכם)
         # ==========================================
         st.sidebar.markdown("---")
         with st.sidebar.expander("🔗 איחוד שמות ומשפחות", expanded=True):
-            st.caption("הגדר קבוצות לאיחוד. לאחר לחיצה על 'שמור', הטופס יתנקה ותוכל להוסיף את המשפחה הבאה.")
+            st.caption("הגדר קבוצות לאיחוד. שמות שכבר נבחרו יוסרו מהרשימה.")
             
-            # רשימת כל השמות המקוריים בקובץ
+            # 1. שליפת כל השמות שיש להם הפקדות
             all_beneficiaries = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
             
-            # --- טופס שמתנקה אוטומטית אחרי שליחה (clear_on_submit=True) ---
+            # 2. סינון: הצג רק שמות שעדיין לא נמצאים ב-merge_map
+            available_beneficiaries = [name for name in all_beneficiaries if name not in st.session_state['merge_map']]
+            
+            # --- טופס שמתנקה אוטומטית ---
             with st.form("merge_form", clear_on_submit=True):
                 new_group_name = st.text_input("שם המשפחה המאוחד (למשל: משפחת פולק)")
-                selected_names = st.multiselect("בחר את השמות לאיחוד:", all_beneficiaries)
+                
+                # השימוש ברשימה המסוננת (available_beneficiaries)
+                selected_names = st.multiselect("בחר את השמות לאיחוד:", available_beneficiaries)
                 
                 submitted = st.form_submit_button("שמור והוסף משפחה נוספת")
                 
                 if submitted:
                     if new_group_name and selected_names:
-                        # שמירה בזיכרון
                         for name in selected_names:
                             st.session_state['merge_map'][name] = new_group_name
                         st.success(f"נשמר: {new_group_name}")
+                        st.rerun() # רענון כדי לעדכן את הרשימה המסוננת מיד
                     else:
                         st.warning("נא להזין שם וגם לבחור אנשים לאיחוד.")
 
@@ -99,24 +101,20 @@ if uploaded_file is not None:
                 st.markdown("---")
                 st.write("📋 **קבוצות פעילות:**")
                 
-                # ארגון הנתונים לתצוגה נוחה
                 grouped_view = {}
                 for original_name, new_name in st.session_state['merge_map'].items():
                     if new_name not in grouped_view:
                         grouped_view[new_name] = []
                     grouped_view[new_name].append(original_name)
                 
-                # הצגת רשימה
                 for group, members in grouped_view.items():
                     with st.expander(f"🔹 {group}", expanded=False):
                         st.write(", ".join(members))
                 
-                # מחיקת איחוד ספציפי
-                st.write("**מחיקת קבוצה:**")
-                group_to_delete = st.selectbox("בחר קבוצה למחיקה", ["- בחר -"] + list(grouped_view.keys()))
+                # מחיקת קבוצה
+                group_to_delete = st.selectbox("בחר קבוצה למחיקה (השמות יחזרו לרשימה)", ["- בחר -"] + list(grouped_view.keys()))
                 if group_to_delete != "- בחר -":
                     if st.button(f"מחק את '{group_to_delete}'"):
-                        # מחיקת כל המפתחות ששייכים לקבוצה הזו
                         keys_to_remove = [k for k, v in st.session_state['merge_map'].items() if v == group_to_delete]
                         for k in keys_to_remove:
                             del st.session_state['merge_map'][k]
@@ -127,7 +125,6 @@ if uploaded_file is not None:
                     st.rerun()
 
         # החלת האיחוד על הדאטה-פריים הראשי
-        # זה קורה אוטומטית לכל הקבוצות שהוגדרו ב-merge_map
         if st.session_state['merge_map']:
             df['Beneficiary'] = df['Beneficiary'].replace(st.session_state['merge_map'])
 
@@ -147,9 +144,6 @@ if uploaded_file is not None:
         
         st.success(f"מציג נתונים בין {start_date} ל-{end_date}")
         
-        # ========================================================
-        # שורה 1: גרפים כלליים
-        # ========================================================
         col_top1, col_top2 = st.columns(2)
         
         with col_top1:
@@ -182,9 +176,6 @@ if uploaded_file is not None:
             fig_bal.update_layout(yaxis=dict(tickformat=",.0f"))
             st.plotly_chart(fig_bal, use_container_width=True)
 
-        # ========================================================
-        # שורה 2: חשמל ותשלומים
-        # ========================================================
         col_mid1, col_mid2 = st.columns(2)
 
         with col_mid1:
@@ -220,9 +211,6 @@ if uploaded_file is not None:
             else:
                 st.info("אין הכנסות בטווח שנבחר.")
 
-        # ========================================================
-        # פירוט תשלומים למשפחה
-        # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
         
@@ -237,7 +225,6 @@ if uploaded_file is not None:
                 st.write("")
                 show_missing_months = st.checkbox("הצג גם חודשים ללא תשלום בגרף", value=False)
             
-            # הנתונים כאן כבר מושפעים מהאיחוד (df_filtered כבר מעודכן)
             actual_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
@@ -333,9 +320,6 @@ if uploaded_file is not None:
         else:
             st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
 
-        # ========================================================
-        # פילוח הוצאות (כללי)
-        # ========================================================
         st.markdown("---")
         st.subheader("🍰 פילוח הוצאות (כללי)")
         expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
@@ -364,10 +348,7 @@ if uploaded_file is not None:
                     st.plotly_chart(fig_p2, use_container_width=True)
                 else:
                     st.info("אין הוצאות נוספות מלבד גז.")
-
-        # ========================================================
-        # פירוט חודשי
-        # ========================================================
+        
         st.markdown("---")
         st.subheader("📅 פירוט חודשי ממוקד")
         
