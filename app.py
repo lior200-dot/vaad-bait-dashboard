@@ -2,17 +2,14 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import io
 
 # --- הגדרות עמוד ---
 st.set_page_config(page_title="דשבורד ועד בית", layout="wide")
 st.title("🏠 דשבורד ניהול כספי - ועד בית")
 
-# --- אתחול Session State ---
+# --- אתחול Session State לניהול איחוד משפחות ---
 if 'merge_map' not in st.session_state:
     st.session_state['merge_map'] = {}
-if 'manual_tags' not in st.session_state:
-    st.session_state['manual_tags'] = {} # מילון לשמירת שיוך ידני: {index: new_name}
 
 # --- פונקציית טעינת נתונים ---
 def load_data(uploaded_file):
@@ -45,9 +42,6 @@ def load_data(uploaded_file):
         df['Beneficiary'] = df['Beneficiary'].fillna('').astype(str)
         
         df['Month'] = df['Date'].dt.strftime('%m/%Y')
-
-        # יצירת אינדקס ייחודי וקבוע לשורות (חשוב לשיוך הידני)
-        df['OriginalIndex'] = df.index
         
         return df
     except Exception as e:
@@ -72,60 +66,19 @@ if uploaded_file is not None:
     
     if not df.empty:
         # ==========================================
-        # 1. מנגנון שיוך תשלומים ידני (חדש)
+        # מנגנון איחוד משפחות (עם סינון חכם)
         # ==========================================
         st.sidebar.markdown("---")
-        with st.sidebar.expander("✍️ שיוך תשלומים ידני (צ'קים/מזומן)", expanded=False):
-            st.caption("שיוך הפקדות ללא שם למשפחה ספציפית.")
-            
-            # סינון שורות הכנסה
-            income_rows = df[df['Credit'] > 0].copy()
-            # יצירת תווית ברורה לבחירה
-            income_rows['Label'] = income_rows.apply(
-                lambda x: f"{x['Date'].strftime('%d/%m/%y')} | {x['Credit']}₪ | {x['Details']} | {x['Beneficiary']}", axis=1
-            )
-            
-            # בחירת השורה
-            selected_row_label = st.selectbox("בחר תנועה:", income_rows['Label'].tolist())
-            
-            if selected_row_label:
-                # מציאת האינדקס המקורי
-                selected_idx = income_rows[income_rows['Label'] == selected_row_label]['OriginalIndex'].values[0]
-                
-                # רשימת משפחות קיימת + אופציה לחדש
-                current_families = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
-                target_family = st.selectbox("שייך למשפחה:", ["- בחר -"] + current_families + ["משפחה חדשה..."])
-                
-                if target_family == "משפחה חדשה...":
-                    target_family = st.text_input("הזן שם משפחה:")
-                
-                if st.button("בצע שיוך"):
-                    if target_family and target_family != "- בחר -":
-                        st.session_state['manual_tags'][selected_idx] = target_family
-                        st.success("השיוך בוצע!")
-                        st.rerun()
-
-            # הצגת שיוכים קיימים
-            if st.session_state['manual_tags']:
-                st.write(f"**שוייכו {len(st.session_state['manual_tags'])} תשלומים.**")
-                if st.button("בטל את כל השיוכים הידניים"):
-                    st.session_state['manual_tags'] = {}
-                    st.rerun()
-
-        # --- החלת השיוכים הידניים (לפני האיחוד ולפני הפילטר) ---
-        for idx, new_name in st.session_state['manual_tags'].items():
-            df.loc[df['OriginalIndex'] == idx, 'Beneficiary'] = new_name
-
-        # ==========================================
-        # 2. מנגנון איחוד משפחות (הקוד הקיים)
-        # ==========================================
-        st.sidebar.markdown("---")
-        with st.sidebar.expander("🔗 איחוד שמות ומשפחות", expanded=False):
+        with st.sidebar.expander("🔗 איחוד שמות ומשפחות", expanded=True):
             st.caption("הגדר קבוצות לאיחוד. שמות שכבר נבחרו יוסרו מהרשימה.")
             
+            # 1. שליפת כל השמות שיש להם הפקדות
             all_beneficiaries = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
+            
+            # 2. סינון: הצג רק שמות שעדיין לא נמצאים ב-merge_map
             available_beneficiaries = [name for name in all_beneficiaries if name not in st.session_state['merge_map']]
             
+            # --- טופס שמתנקה אוטומטית ---
             with st.form("merge_form", clear_on_submit=True):
                 new_group_name = st.text_input("שם המשפחה המאוחד (למשל: משפחת פולק)")
                 selected_names = st.multiselect("בחר את השמות לאיחוד:", available_beneficiaries)
@@ -141,17 +94,22 @@ if uploaded_file is not None:
                     else:
                         st.warning("נא להזין שם וגם לבחור אנשים לאיחוד.")
 
+            # --- תצוגת הקבוצות הפעילות ---
             if st.session_state['merge_map']:
+                st.markdown("---")
                 st.write("📋 **קבוצות פעילות:**")
+                
                 grouped_view = {}
                 for original_name, new_name in st.session_state['merge_map'].items():
-                    grouped_view.setdefault(new_name, []).append(original_name)
+                    if new_name not in grouped_view:
+                        grouped_view[new_name] = []
+                    grouped_view[new_name].append(original_name)
                 
                 for group, members in grouped_view.items():
                     with st.expander(f"🔹 {group}", expanded=False):
                         st.write(", ".join(members))
                 
-                group_to_delete = st.selectbox("בחר קבוצה למחיקה", ["- בחר -"] + list(grouped_view.keys()))
+                group_to_delete = st.selectbox("בחר קבוצה למחיקה (השמות יחזרו לרשימה)", ["- בחר -"] + list(grouped_view.keys()))
                 if group_to_delete != "- בחר -":
                     if st.button(f"מחק את '{group_to_delete}'"):
                         keys_to_remove = [k for k, v in st.session_state['merge_map'].items() if v == group_to_delete]
@@ -163,7 +121,7 @@ if uploaded_file is not None:
                     st.session_state['merge_map'] = {}
                     st.rerun()
 
-        # --- החלת האיחוד ---
+        # החלת האיחוד
         if st.session_state['merge_map']:
             df['Beneficiary'] = df['Beneficiary'].replace(st.session_state['merge_map'])
 
@@ -182,28 +140,7 @@ if uploaded_file is not None:
         df_filtered = df.loc[mask]
         
         st.success(f"מציג נתונים בין {start_date} ל-{end_date}")
-
-        # ==========================================
-        # 3. ייצוא נתונים מעובדים (חדש)
-        # ==========================================
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("📥 ייצוא נתונים")
         
-        # המרת הדאטה המעובד לאקסל בזיכרון
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_filtered.to_excel(writer, index=False, sheet_name='Data')
-            
-        st.sidebar.download_button(
-            label="הורד נתונים מעובדים (Excel)",
-            data=buffer,
-            file_name="vaad_bayit_processed.xlsx",
-            mime="application/vnd.ms-excel"
-        )
-        
-        # ==========================================
-        # אזור הגרפים (ללא שינוי)
-        # ==========================================
         col_top1, col_top2 = st.columns(2)
         
         with col_top1:
@@ -332,7 +269,7 @@ if uploaded_file is not None:
             if not df_graph.empty:
                 df_graph['RowID'] = range(len(df_graph))
                 
-                # מציאת הערך המקסימלי כדי להגדיל את הגרף
+                # --- תיקון: מציאת הערך המקסימלי כדי להגדיל את הגרף ---
                 max_credit = df_graph['Credit'].max() if not df_graph.empty else 100
                 
                 fig_family = px.bar(
@@ -353,6 +290,7 @@ if uploaded_file is not None:
                         ticktext=df_graph['Month'],
                         title_text="חודש ושנה"
                     ),
+                    # כאן התיקון: מוסיף 20% גובה לציר ה-Y כדי שהטקסט לא ייחתך
                     yaxis=dict(
                         range=[0, max_credit * 1.2]
                     ),
@@ -363,7 +301,7 @@ if uploaded_file is not None:
                 fig_family.update_traces(
                     texttemplate='%{text:,.0f}', 
                     textposition='outside',
-                    cliponaxis=False,
+                    cliponaxis=False, # מונע חיתוך טקסט שחורג מהציר
                     textfont=dict(size=14, color='black'),
                     marker_line_width=1,
                     marker_line_color='black'
