@@ -7,11 +7,9 @@ from datetime import datetime
 st.set_page_config(page_title="דשבורד ועד בית", layout="wide")
 st.title("🏠 דשבורד ניהול כספי - ועד בית")
 
-# --- אתחול Session State ---
+# --- אתחול Session State לניהול איחוד משפחות ---
 if 'merge_map' not in st.session_state:
     st.session_state['merge_map'] = {}
-if 'manual_tags' not in st.session_state:
-    st.session_state['manual_tags'] = {}  # מילון לשמירת שיוך ידני של צ'קים: {index: new_name}
 
 # --- פונקציית טעינת נתונים ---
 def load_data(uploaded_file):
@@ -20,7 +18,7 @@ def load_data(uploaded_file):
         cols = df.columns.tolist()
         
         if len(cols) < 9:
-            st.error("קובץ האקסל לא תואם למבנה המצופה.")
+            st.error("קובץ האקסל לא תואם למבנה המצופה (חסרות עמודות).")
             return pd.DataFrame()
 
         mapping = {
@@ -42,10 +40,8 @@ def load_data(uploaded_file):
         df['Details'] = df['Details'].fillna('').astype(str)
         df['Action'] = df['Action'].fillna('').astype(str)
         df['Beneficiary'] = df['Beneficiary'].fillna('').astype(str)
-        df['Month'] = df['Date'].dt.strftime('%m/%Y')
         
-        # יצירת אינדקס ייחודי וקבוע לשורות (חשוב לשיוך הידני)
-        df['OriginalIndex'] = df.index
+        df['Month'] = df['Date'].dt.strftime('%m/%Y')
         
         return df
     except Exception as e:
@@ -55,12 +51,11 @@ def load_data(uploaded_file):
 # --- פונקציית עזר לקטגוריזציה ---
 def categorize_expense(row):
     text = (str(row['Action']) + " " + str(row['Details'])).lower()
-    if any(x in text for x in ['עמלה', 'ע.מפעולות']): return 'עמלות בנק'
-    if 'גז' in text: return 'גז'
-    if 'חשמל' in text: return 'חשמל'
-    if 'גינון' in text: return 'גינון'
-    if 'מעלית' in text: return 'מעלית'
-    return 'אחר'
+    if 'ע.מפעולות-ישיר' in text or 'ע. מפעולות ישיר' in text or 'ע. מסלול בסיסי' in text or 'ע.מפעולות-פקיד' in text:
+        return 'עמלות בנק'
+    if 'גז ניהול מבנים' in text:
+        return 'גז ניהול מבנים'
+    return row['Details'] if row['Details'] else row['Action']
 
 # --- ממשק צד (Sidebar) ---
 st.sidebar.header("העלאת נתונים")
@@ -70,62 +65,59 @@ if uploaded_file is not None:
     df = load_data(uploaded_file)
     
     if not df.empty:
-        
         # ==========================================
-        # 1. מנגנון שיוך צ'קים ומזומן (ידני)
+        # מנגנון איחוד משפחות (עם סינון חכם)
         # ==========================================
         st.sidebar.markdown("---")
-        with st.sidebar.expander("✍️ שיוך צ'קים/מזומן לדיירים", expanded=False):
-            st.caption("כאן ניתן לשייך הפקדות ללא שם (כמו צ'קים) למשפחה ספציפית.")
+        with st.sidebar.expander("🔗 איחוד שמות ומשפחות", expanded=True):
+            st.caption("הגדר קבוצות לאיחוד. שמות שכבר נבחרו יוסרו מהרשימה.")
             
-            # סינון שורות שהן הכנסות (Credit > 0)
-            income_rows = df[df['Credit'] > 0].copy()
-            income_rows['Label'] = income_rows.apply(
-                lambda x: f"{x['Date'].strftime('%d/%m')} | {x['Credit']}₪ | {x['Details']} | {x['Beneficiary']}", axis=1
-            )
-            
-            # בחירת השורה הבעייתית
-            selected_row_label = st.selectbox("בחר תנועה לשיוך:", income_rows['Label'].tolist())
-            
-            # חילוץ האינדקס של השורה שנבחרה
-            if selected_row_label:
-                selected_idx = income_rows[income_rows['Label'] == selected_row_label]['OriginalIndex'].values[0]
-                
-                # רשימת דיירים קיימת + אפשרות להוסיף חדש
-                existing_names = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
-                target_family = st.selectbox("שייך למשפחה:", existing_names + ["אחר..."])
-                
-                if target_family == "אחר...":
-                    target_family = st.text_input("הזן שם משפחה חדש:")
-                
-                if st.button("בצע שיוך"):
-                    if target_family:
-                        st.session_state['manual_tags'][selected_idx] = target_family
-                        st.success("השיוך בוצע בהצלחה! (הגרפים יתעדכנו מיד)")
-                        st.rerun()
-
-        # החלת השיוכים הידניים על הדאטה-פריים
-        for idx, new_name in st.session_state['manual_tags'].items():
-            df.loc[df['OriginalIndex'] == idx, 'Beneficiary'] = new_name
-
-        # ==========================================
-        # 2. מנגנון איחוד משפחות (הקוד הקודם)
-        # ==========================================
-        with st.sidebar.expander("🔗 איחוד שמות ומשפחות", expanded=False):
-            # ... (אותו קוד כמו קודם) ...
+            # 1. שליפת כל השמות שיש להם הפקדות
             all_beneficiaries = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
+            
+            # 2. סינון: הצג רק שמות שעדיין לא נמצאים ב-merge_map
             available_beneficiaries = [name for name in all_beneficiaries if name not in st.session_state['merge_map']]
             
+            # --- טופס שמתנקה אוטומטית ---
             with st.form("merge_form", clear_on_submit=True):
-                new_group_name = st.text_input("שם מאוחד")
-                selected_names = st.multiselect("בחר שמות:", available_beneficiaries)
-                if st.form_submit_button("שמור"):
-                    for name in selected_names: st.session_state['merge_map'][name] = new_group_name
-                    st.rerun()
-            
+                new_group_name = st.text_input("שם המשפחה המאוחד (למשל: משפחת פולק)")
+                selected_names = st.multiselect("בחר את השמות לאיחוד:", available_beneficiaries)
+                
+                submitted = st.form_submit_button("שמור והוסף משפחה נוספת")
+                
+                if submitted:
+                    if new_group_name and selected_names:
+                        for name in selected_names:
+                            st.session_state['merge_map'][name] = new_group_name
+                        st.success(f"נשמר: {new_group_name}")
+                        st.rerun()
+                    else:
+                        st.warning("נא להזין שם וגם לבחור אנשים לאיחוד.")
+
+            # --- תצוגת הקבוצות הפעילות ---
             if st.session_state['merge_map']:
-                st.write("**איחודים פעילים:**")
-                if st.button("אפס איחודים"):
+                st.markdown("---")
+                st.write("📋 **קבוצות פעילות:**")
+                
+                grouped_view = {}
+                for original_name, new_name in st.session_state['merge_map'].items():
+                    if new_name not in grouped_view:
+                        grouped_view[new_name] = []
+                    grouped_view[new_name].append(original_name)
+                
+                for group, members in grouped_view.items():
+                    with st.expander(f"🔹 {group}", expanded=False):
+                        st.write(", ".join(members))
+                
+                group_to_delete = st.selectbox("בחר קבוצה למחיקה (השמות יחזרו לרשימה)", ["- בחר -"] + list(grouped_view.keys()))
+                if group_to_delete != "- בחר -":
+                    if st.button(f"מחק את '{group_to_delete}'"):
+                        keys_to_remove = [k for k, v in st.session_state['merge_map'].items() if v == group_to_delete]
+                        for k in keys_to_remove:
+                            del st.session_state['merge_map'][k]
+                        st.rerun()
+
+                if st.button("🗑️ אפס את כל האיחודים"):
                     st.session_state['merge_map'] = {}
                     st.rerun()
 
@@ -134,114 +126,277 @@ if uploaded_file is not None:
             df['Beneficiary'] = df['Beneficiary'].replace(st.session_state['merge_map'])
 
         # ==========================================
-        # סינון תאריכים
+        # המשך הקוד הרגיל
         # ==========================================
         st.sidebar.markdown("---")
+        st.sidebar.header("סינון תאריכים")
         min_date = df['Date'].min().date()
         max_date = df['Date'].max().date()
+        
         start_date = st.sidebar.date_input("תאריך התחלה", min_date)
         end_date = st.sidebar.date_input("תאריך סיום", max_date)
+        
         mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
         df_filtered = df.loc[mask]
+        
+        st.success(f"מציג נתונים בין {start_date} ל-{end_date}")
+        
+        col_top1, col_top2 = st.columns(2)
+        
+        with col_top1:
+            st.subheader("⚖️ הכנסות מול הוצאות (חודשי)")
+            if not df_filtered.empty:
+                monthly_summary = df_filtered.copy()
+                monthly_summary['MonthDate'] = monthly_summary['Date'].dt.to_period('M')
+                grouped = monthly_summary.groupby('MonthDate')[['Credit', 'Debit']].sum().reset_index()
+                grouped['MonthStr'] = grouped['MonthDate'].dt.strftime('%m/%Y')
+                
+                monthly_melt = grouped.melt(id_vars='MonthStr', value_vars=['Credit', 'Debit'], 
+                                            var_name='Type', value_name='Amount')
+                monthly_melt['Type'] = monthly_melt['Type'].replace({'Credit': 'הכנסות', 'Debit': 'הוצאות'})
+                
+                fig_inc_exp = px.bar(monthly_melt, x='MonthStr', y='Amount', color='Type', barmode='group',
+                                     text='Amount',
+                                     color_discrete_map={'הכנסות': '#2ecc71', 'הוצאות': '#e74c3c'},
+                                     labels={'Amount': 'סכום (ש"ח)', 'MonthStr': 'חודש', 'Type': 'סוג'})
+                fig_inc_exp.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+                st.plotly_chart(fig_inc_exp, use_container_width=True)
+            else:
+                st.info("אין נתונים להצגה.")
 
-        # ==========================================
-        # מפת חום חכמה (מצטברת)
-        # ==========================================
-        st.subheader("🌡️ מפת גבייה ומצב חוב (מצטבר)")
-        
-        # 1. קלט סכום ועד חודשי
-        monthly_fee = st.number_input("הכנס סכום ועד בית חודשי למשפחה (בש\"ח):", min_value=0, value=250, step=10)
-        
-        if monthly_fee > 0:
-            # 2. יצירת ציר זמן מלא
-            normalized_start = start_date.replace(day=1)
-            full_date_range = pd.date_range(start=normalized_start, end=end_date, freq='MS')
+        with col_top2:
+            st.subheader("💰 מגמת יתרה בחשבון")
+            df_sorted = df_filtered.sort_values('Date')
+            fig_bal = px.line(df_sorted, x='Date', y='Balance',
+                              labels={'Balance': 'יתרה', 'Date': 'תאריך'},
+                              color_discrete_sequence=['purple'])
+            fig_bal.update_layout(yaxis=dict(tickformat=",.0f"))
+            st.plotly_chart(fig_bal, use_container_width=True)
+
+        col_mid1, col_mid2 = st.columns(2)
+
+        with col_mid1:
+            st.subheader("⚡ הוצאות חשמל")
+            is_electric = df_filtered['Action'].str.contains('חשמל', na=False) | \
+                          df_filtered['Details'].str.contains('חשמל', na=False) | \
+                          df_filtered['Beneficiary'].str.contains('חשמל', na=False)
             
-            heatmap_data = []
-            
-            # רשימת כל המשפחות המשלמות (אחרי איחוד ושיוך)
-            families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
-            
-            for family in families:
-                # סינון תשלומים למשפחה זו
-                family_payments = df_filtered[
-                    (df_filtered['Beneficiary'] == family) & 
-                    (df_filtered['Credit'] > 0)
-                ].copy()
+            electric_df = df_filtered[is_electric & (df_filtered['Debit'] > 0)]
+            if not electric_df.empty:
+                monthly_electric = electric_df.groupby('Month')['Debit'].sum().reset_index()
+                monthly_electric['SortDate'] = pd.to_datetime(monthly_electric['Month'], format='%m/%Y')
+                monthly_electric = monthly_electric.sort_values('SortDate')
                 
-                cumulative_paid = 0
-                cumulative_expected = 0
+                fig_elec = px.bar(monthly_electric, x='Month', y='Debit', text='Debit',
+                                  labels={'Debit': 'סכום (ש"ח)', 'Month': 'חודש'},
+                                  color_discrete_sequence=['orange'])
+                fig_elec.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+                st.plotly_chart(fig_elec, use_container_width=True)
+            else:
+                st.info("לא נמצאו הוצאות חשמל בטווח זה.")
+
+        with col_mid2:
+            st.subheader("🏆 סיכום תשלומים לפי משפחה")
+            income_df = df_filtered[df_filtered['Credit'] > 0]
+            if not income_df.empty:
+                total_per_family = income_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Beneficiary', ascending=True)
+                fig_pay = px.bar(total_per_family, x='Beneficiary', y='Credit', text='Credit',
+                                 labels={'Credit': 'סה"כ שולם', 'Beneficiary': 'משפחה'},
+                                 color_discrete_sequence=['teal'])
+                fig_pay.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+                st.plotly_chart(fig_pay, use_container_width=True)
+            else:
+                st.info("אין הכנסות בטווח שנבחר.")
+
+        st.markdown("---")
+        st.subheader("🔎 פירוט תשלומים למשפחה")
+        
+        paying_families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
+        
+        if len(paying_families) > 0:
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
+            with c2:
+                st.write("") 
+                st.write("")
+                show_missing_months = st.checkbox("הצג גם חודשים ללא תשלום בגרף", value=False)
+            
+            actual_payments = df_filtered[
+                (df_filtered['Beneficiary'] == selected_family) & 
+                (df_filtered['Credit'] > 0)
+            ].copy().sort_values('Date')
+            
+            graph_data = []
+            
+            if show_missing_months:
+                normalized_start = start_date.replace(day=1)
+                full_date_range = pd.date_range(start=normalized_start, end=end_date, freq='MS')
                 
-                for i, date_point in enumerate(full_date_range):
+                for date_point in full_date_range:
                     month_str = date_point.strftime('%m/%Y')
+                    payments_in_month = actual_payments[actual_payments['Month'] == month_str]
                     
-                    # כמה צריך היה לשלם עד החודש הזה (כולל)?
-                    cumulative_expected += monthly_fee
-                    
-                    # כמה שילמו בחודש הספציפי הזה?
-                    payment_in_month = family_payments[family_payments['Month'] == month_str]['Credit'].sum()
-                    cumulative_paid += payment_in_month
-                    
-                    # חישוב היתרה המצטברת (האם שילמו מספיק כדי לכסות עד עכשיו?)
-                    balance = cumulative_paid - cumulative_expected
-                    
-                    # סטטוס לצביעה
-                    # אם היתרה חיובית או אפס - הכל בסדר (שילמו מראש או בזמן)
-                    # אם היתרה שלילית - הם בחוב
-                    status_val = balance 
-                    
-                    heatmap_data.append({
-                        'Family': family,
-                        'Month': month_str,
-                        'Balance': balance,
-                        'PaidThisMonth': payment_in_month
+                    if not payments_in_month.empty:
+                        for _, row in payments_in_month.iterrows():
+                            graph_data.append({
+                                'Date': row['Date'],
+                                'Month': month_str,
+                                'Credit': row['Credit'],
+                                'Details': row['Details'],
+                                'FullDate': row['Date'].strftime('%d/%m/%Y')
+                            })
+                    else:
+                        graph_data.append({
+                            'Date': date_point,
+                            'Month': month_str,
+                            'Credit': 0,
+                            'Details': '❌ לא שולם',
+                            'FullDate': ''
+                        })
+            else:
+                for _, row in actual_payments.iterrows():
+                    graph_data.append({
+                        'Date': row['Date'],
+                        'Month': row['Month'],
+                        'Credit': row['Credit'],
+                        'Details': row['Details'],
+                        'FullDate': row['Date'].strftime('%d/%m/%Y')
                     })
 
-            if heatmap_data:
-                hm_df = pd.DataFrame(heatmap_data)
+            df_graph = pd.DataFrame(graph_data)
+            
+            if not df_graph.empty:
+                df_graph['RowID'] = range(len(df_graph))
                 
-                # המרה לפורמט מטריצה (Pivot) עבור מפת החום
-                hm_pivot = hm_df.pivot(index='Family', columns='Month', values='Balance')
+                # --- תיקון: מציאת הערך המקסימלי כדי להגדיל את הגרף ---
+                max_credit = df_graph['Credit'].max() if not df_graph.empty else 100
                 
-                # סידור העמודות לפי סדר כרונולוגי
-                sorted_columns = [d.strftime('%m/%Y') for d in full_date_range]
-                # סינון רק לעמודות שקיימות ב-pivot (למניעת שגיאות בקצוות)
-                valid_columns = [c for c in sorted_columns if c in hm_pivot.columns]
-                hm_pivot = hm_pivot[valid_columns]
-                
-                # יצירת מפת חום עם Plotly
-                # צבע אדום למינוס (חוב), ירוק לפלוס (שולם/יתרה), לבן לאפס
-                fig_heat = px.imshow(
-                    hm_pivot,
-                    labels=dict(x="חודש", y="משפחה", color="יתרה מצטברת"),
-                    x=valid_columns,
-                    y=hm_pivot.index,
-                    color_continuous_scale=['red', 'white', 'green'],
-                    color_continuous_midpoint=0, # האפס הוא המרכז (לבן)
-                    text_auto=False,
-                    aspect="auto"
+                fig_family = px.bar(
+                    df_graph, 
+                    x='RowID', 
+                    y='Credit', 
+                    text='Credit',
+                    color='Month',
+                    hover_data={'FullDate': True, 'Month': False, 'RowID': False, 'Details': True},
+                    title=f'היסטוריית תשלומים - {selected_family}',
+                    labels={'Credit': 'סכום (ש"ח)', 'FullDate': 'תאריך'}
                 )
                 
-                # הוספת טקסט מותאם אישית (להציג יתרה בתוך הריבועים)
-                fig_heat.update_traces(
-                    text=hm_pivot.values,
-                    texttemplate="%{text:.0f}",
-                    hovertemplate="משפחה: %{y}<br>חודש: %{x}<br>יתרה מצטברת: %{z:,.0f}₪<extra></extra>"
+                fig_family.update_layout(
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=df_graph['RowID'],
+                        ticktext=df_graph['Month'],
+                        title_text="חודש ושנה"
+                    ),
+                    # כאן התיקון: מוסיף 20% גובה לציר ה-Y כדי שהטקסט לא ייחתך
+                    yaxis=dict(
+                        range=[0, max_credit * 1.2]
+                    ),
+                    showlegend=False,
+                    bargap=0.3
                 )
                 
-                fig_heat.update_layout(height=max(400, len(families) * 40)) # גובה דינמי
-                st.plotly_chart(fig_heat, use_container_width=True)
+                fig_family.update_traces(
+                    texttemplate='%{text:,.0f}', 
+                    textposition='outside',
+                    cliponaxis=False, # מונע חיתוך טקסט שחורג מהציר
+                    textfont=dict(size=14, color='black'),
+                    marker_line_width=1,
+                    marker_line_color='black'
+                )
                 
-                st.info("💡 **הסבר:** מפה זו מציגה יתרה מצטברת. **ירוק** = שולם בזמן או מראש (פלוס). **אדום** = חוב מצטבר. גם אם דייר שילם בתחילת השנה, החודשים הבאים יהיו ירוקים כי היתרה שלו מכסה אותם.")
+                if show_missing_months:
+                     fig_family.for_each_trace(lambda t: t.update(text=[v if v > 0 else "" for v in t.y]))
+
+                st.plotly_chart(fig_family, use_container_width=True)
+
+            st.caption("פירוט תשלומים שבוצעו:")
+            table_df = actual_payments[['Date', 'Credit', 'Details', 'Action']].copy()
+            table_df['Date'] = table_df['Date'].dt.strftime('%d/%m/%Y')
+            table_df = table_df.rename(columns={'Date': 'תאריך', 'Credit': 'סכום (ש"ח)', 'Details': 'פרטים', 'Action': 'פעולה'})
+            
+            st.dataframe(table_df, use_container_width=True, hide_index=True)
+            
+            total_paid = actual_payments['Credit'].sum()
+            st.write(f"**סה\"כ שולם בתקופה זו:** {total_paid:,.0f} ש\"ח")
 
         else:
-            st.warning("נא להזין סכום ועד חודשי כדי לחשב את מפת החובות.")
+            st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
 
-        # ==========================================
-        # המשך הגרפים הרגילים (פירוט משפחה וכו')
-        # ==========================================
-        # ... (כאן יבואו שאר הגרפים מהקוד הקודם שלך) ...
-        # שים לב: הגרפים האחרים ישתמשו ב-df שיש בו כבר את השמות המעודכנים!
+        st.markdown("---")
+        st.subheader("🍰 פילוח הוצאות (כללי)")
+        expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
+        
+        if not expense_df.empty:
+            expense_df['Category'] = expense_df.apply(categorize_expense, axis=1)
+            cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
+            
+            p_col1, p_col2 = st.columns(2)
+            
+            with p_col1:
+                st.caption("כלל ההוצאות")
+                fig_p1 = px.pie(cat_summary, values='Debit', names='Category', hole=0.3)
+                fig_p1.update_traces(textposition='inside', textinfo='percent+label')
+                fig_p1.update_layout(showlegend=True, legend=dict(orientation="h"))
+                st.plotly_chart(fig_p1, use_container_width=True)
+            
+            with p_col2:
+                st.caption("הוצאות ללא גז")
+                no_gas_df = cat_summary[cat_summary['Category'] != 'גז ניהול מבנים']
+                if not no_gas_df.empty:
+                    fig_p2 = px.pie(no_gas_df, values='Debit', names='Category', hole=0.3,
+                                    color_discrete_sequence=px.colors.qualitative.Pastel)
+                    fig_p2.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_p2.update_layout(showlegend=True, legend=dict(orientation="h"))
+                    st.plotly_chart(fig_p2, use_container_width=True)
+                else:
+                    st.info("אין הוצאות נוספות מלבד גז.")
+        
+        st.markdown("---")
+        st.subheader("📅 פירוט חודשי ממוקד")
+        
+        unique_periods = df_filtered['Date'].dt.to_period('M').unique()
+        sorted_periods = sorted(unique_periods, reverse=True)
+        available_months = [p.strftime('%m/%Y') for p in sorted_periods]
+        
+        if len(available_months) > 0:
+            selected_month = st.selectbox("בחר חודש לצפייה בפירוט:", available_months)
+            month_data = df_filtered[df_filtered['Month'] == selected_month]
+            
+            m_col1, m_col2 = st.columns(2)
+            
+            with m_col1:
+                st.caption(f"הכנסות - {selected_month}")
+                month_income = month_data[month_data['Credit'] > 0]
+                if not month_income.empty:
+                    income_pie = month_income.groupby('Beneficiary')['Credit'].sum().reset_index()
+                    fig_m_inc = px.pie(income_pie, values='Credit', names='Beneficiary', hole=0.3,
+                                       color_discrete_sequence=px.colors.qualitative.Set3)
+                    fig_m_inc.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_m_inc.update_layout(showlegend=False)
+                    st.plotly_chart(fig_m_inc, use_container_width=True)
+                    st.write(f"סה\"כ הכנסות: {month_income['Credit'].sum():,.0f} ש\"ח")
+                else:
+                    st.info("אין הכנסות בחודש זה.")
+            
+            with m_col2:
+                st.caption(f"הוצאות - {selected_month}")
+                month_expense = month_data[month_data['Debit'] > 0].copy()
+                if not month_expense.empty:
+                    month_expense['Category'] = month_expense.apply(categorize_expense, axis=1)
+                    expense_pie = month_expense.groupby('Category')['Debit'].sum().reset_index()
+                    fig_m_exp = px.pie(expense_pie, values='Debit', names='Category', hole=0.3,
+                                       color_discrete_sequence=px.colors.qualitative.Pastel)
+                    fig_m_exp.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_m_exp.update_layout(showlegend=True, legend=dict(orientation="h"))
+                    st.plotly_chart(fig_m_exp, use_container_width=True)
+                    st.write(f"סה\"כ הוצאות: {month_expense['Debit'].sum():,.0f} ש\"ח")
+                else:
+                    st.info("אין הוצאות בחודש זה.")
+        else:
+            st.info("אין נתונים זמינים לבחירת חודשים.")
 
 else:
     st.info("אנא העלה קובץ אקסל כדי להתחיל.")
