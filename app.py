@@ -149,7 +149,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות בטווח שנבחר.")
 
         # ========================================================
-        # פירוט תשלומים למשפחה - התיקון הקריטי
+        # פירוט תשלומים למשפחה - עם האופציה לבחירה
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
@@ -157,60 +157,71 @@ if uploaded_file is not None:
         paying_families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
         
         if len(paying_families) > 0:
-            selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                selected_family = st.selectbox("בחר משפחה להצגת פירוט:", paying_families)
+            with c2:
+                # הוספת ה-Checkbox לשליטה על התצוגה
+                st.write("") # ריווח
+                st.write("")
+                show_missing_months = st.checkbox("הצג גם חודשים ללא תשלום בגרף", value=False)
             
-            # 1. שליפת התשלומים בפועל
+            # 1. שליפת התשלומים בפועל (בסיס לטבלה ולגרף הפשוט)
             actual_payments = df_filtered[
                 (df_filtered['Beneficiary'] == selected_family) & 
                 (df_filtered['Credit'] > 0)
-            ].copy()
+            ].copy().sort_values('Date')
             
-            # 2. יצירת רשימה אחידה
-            normalized_start = start_date.replace(day=1)
-            full_date_range = pd.date_range(start=normalized_start, end=end_date, freq='MS') 
+            # הכנת הנתונים לגרף - תלוי בבחירת המשתמש
+            graph_data = []
             
-            combined_rows = []
-            
-            for date_point in full_date_range:
-                month_str = date_point.strftime('%m/%Y')
+            if show_missing_months:
+                # --- אופציה ב': הצגת כל החודשים (כולל ריקים) ---
+                normalized_start = start_date.replace(day=1)
+                full_date_range = pd.date_range(start=normalized_start, end=end_date, freq='MS')
                 
-                # מציאת תשלומים קיימים בחודש זה
-                payments_in_month = actual_payments[actual_payments['Month'] == month_str]
-                
-                if not payments_in_month.empty:
-                    # הוספת שורות קיימות - בניה ידנית כדי להבטיח שהמפתחות זהים
-                    for _, row in payments_in_month.iterrows():
-                        combined_rows.append({
-                            'Date': row['Date'],
+                for date_point in full_date_range:
+                    month_str = date_point.strftime('%m/%Y')
+                    payments_in_month = actual_payments[actual_payments['Month'] == month_str]
+                    
+                    if not payments_in_month.empty:
+                        for _, row in payments_in_month.iterrows():
+                            graph_data.append({
+                                'Date': row['Date'],
+                                'Month': month_str,
+                                'Credit': row['Credit'],
+                                'Details': row['Details'],
+                                'FullDate': row['Date'].strftime('%d/%m/%Y')
+                            })
+                    else:
+                        # חודש ריק
+                        graph_data.append({
+                            'Date': date_point,
                             'Month': month_str,
-                            'Credit': row['Credit'],
-                            'Details': row['Details'],
-                            'Action': row['Action'],
-                            'Beneficiary': selected_family,
-                            'Type': 'Paid' # סימון פנימי
+                            'Credit': 0,
+                            'Details': '❌ לא שולם',
+                            'FullDate': ''
                         })
-                else:
-                    # הוספת שורת דמה לחודש ריק
-                    combined_rows.append({
-                        'Date': date_point,
-                        'Month': month_str,
-                        'Credit': 0,
-                        'Details': '❌ לא שולם',
-                        'Action': '-',
-                        'Beneficiary': selected_family,
-                        'Type': 'Empty' # סימון פנימי
+            else:
+                # --- אופציה א' (ברירת מחדל): רק מה ששולם ---
+                for _, row in actual_payments.iterrows():
+                    graph_data.append({
+                        'Date': row['Date'],
+                        'Month': row['Month'],
+                        'Credit': row['Credit'],
+                        'Details': row['Details'],
+                        'FullDate': row['Date'].strftime('%d/%m/%Y')
                     })
+
+            # יצירת ה-DataFrame לגרף
+            df_graph = pd.DataFrame(graph_data)
             
-            # יצירת DataFrame לתצוגה
-            display_df = pd.DataFrame(combined_rows)
-            
-            if not display_df.empty:
-                display_df['RowID'] = range(len(display_df))
-                display_df['FullDate'] = display_df['Date'].dt.strftime('%d/%m/%Y')
+            if not df_graph.empty:
+                df_graph['RowID'] = range(len(df_graph))
                 
                 # יצירת הגרף
                 fig_family = px.bar(
-                    display_df, 
+                    df_graph, 
                     x='RowID', 
                     y='Credit', 
                     text='Credit',
@@ -220,11 +231,12 @@ if uploaded_file is not None:
                     labels={'Credit': 'סכום (ש"ח)', 'FullDate': 'תאריך'}
                 )
                 
+                # עיצוב ציר X
                 fig_family.update_layout(
                     xaxis=dict(
                         tickmode='array',
-                        tickvals=display_df['RowID'],
-                        ticktext=display_df['Month'],
+                        tickvals=df_graph['RowID'],
+                        ticktext=df_graph['Month'],
                         title_text="חודש ושנה"
                     ),
                     showlegend=False,
@@ -238,31 +250,23 @@ if uploaded_file is not None:
                     marker_line_width=1,
                     marker_line_color='black'
                 )
-                # הסתרת האפסים בגרף
-                fig_family.for_each_trace(lambda t: t.update(text=[v if v > 0 else "" for v in t.y]))
+                
+                # הסתרת ה-0 אם מציגים חודשים ריקים
+                if show_missing_months:
+                     fig_family.for_each_trace(lambda t: t.update(text=[v if v > 0 else "" for v in t.y]))
 
                 st.plotly_chart(fig_family, use_container_width=True)
 
-                # טבלה עם צביעה
-                st.caption("פירוט בטבלה (אדום = לא שולם):")
-                
-                def highlight_zeros(row):
-                    # שימוש ב-safe lookup עם .get למקרה חירום, למרות שעכשיו בנינו את זה טוב
-                    val = row.get('Credit', 0)
-                    if val == 0:
-                        return ['background-color: #ffcccc; color: #990000'] * len(row)
-                    return [''] * len(row)
-
-                table_df = display_df[['Date', 'Credit', 'Details', 'Action']].copy()
-                table_df['Date'] = table_df['Date'].dt.strftime('%d/%m/%Y')
-                table_df = table_df.rename(columns={'Date': 'תאריך', 'Credit': 'סכום (ש"ח)', 'Details': 'פרטים', 'Action': 'פעולה'})
-                
-                st.dataframe(table_df.style.apply(highlight_zeros, axis=1), use_container_width=True, hide_index=True)
-                
-                total_paid = actual_payments['Credit'].sum()
-                st.write(f"**סה\"כ שולם בפועל בתקופה זו:** {total_paid:,.0f} ש\"ח")
-            else:
-                 st.info("לא נמצאו נתונים להצגה.")
+            # --- הטבלה: מציגה תמיד רק את התשלומים בפועל ---
+            st.caption("פירוט תשלומים שבוצעו:")
+            table_df = actual_payments[['Date', 'Credit', 'Details', 'Action']].copy()
+            table_df['Date'] = table_df['Date'].dt.strftime('%d/%m/%Y')
+            table_df = table_df.rename(columns={'Date': 'תאריך', 'Credit': 'סכום (ש"ח)', 'Details': 'פרטים', 'Action': 'פעולה'})
+            
+            st.dataframe(table_df, use_container_width=True, hide_index=True)
+            
+            total_paid = actual_payments['Credit'].sum()
+            st.write(f"**סה\"כ שולם בתקופה זו:** {total_paid:,.0f} ש\"ח")
 
         else:
             st.info("אין נתוני תשלומים בטווח התאריכים שנבחר.")
