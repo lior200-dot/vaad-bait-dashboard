@@ -176,7 +176,7 @@ if uploaded_file is not None:
         
         # --- גרף 1: הכנסות מול הוצאות ---
         with col_row1_1:
-            st.caption("הכנסות מול הוצאות (חודשי)")
+            st.subheader("הכנסות מול הוצאות")
             if not df_filtered.empty:
                 ms = df_filtered.copy()
                 ms['MonthDate'] = ms['Date'].dt.to_period('M')
@@ -191,20 +191,20 @@ if uploaded_file is not None:
 
         # --- גרף 2: מגמת יתרה ---
         with col_row1_2:
-            st.caption("מגמת יתרה מצטברת")
+            st.subheader("מגמת יתרה מצטברת")
             df_srt = df_filtered.sort_values('Date')
             fig = px.line(df_srt, x='Date', y='Balance', color_discrete_sequence=['purple'])
             fig.update_layout(yaxis=dict(tickformat=",.0f"))
             st.plotly_chart(fig, use_container_width=True)
 
         # ========================================================
-        #  חלק ב': ניתוח חודשי וחשמל (הוחלפו הצדדים)
+        #  חלק ב': ניתוח חודשי וחשמל
         # ========================================================
         col_row2_1, col_row2_2 = st.columns(2)
 
-        # --- ימין (החדש): פירוט חודשי ממוקד ---
+        # --- ימין: פירוט חודשי ממוקד ---
         with col_row2_1:
-            st.caption("פירוט חודשי ממוקד (הוצאות)")
+            st.subheader("פירוט חודשי ממוקד (הוצאות)")
             unique_periods = df_filtered['Date'].dt.to_period('M').unique()
             sorted_periods = sorted(unique_periods, reverse=True)
             available_months = [p.strftime('%m/%Y') for p in sorted_periods]
@@ -213,27 +213,24 @@ if uploaded_file is not None:
                 selected_month = st.selectbox("בחר חודש:", available_months, label_visibility="collapsed")
                 month_data = df_filtered[df_filtered['Month'] == selected_month]
                 
-                # חישוב וסינון הוצאות לחודש
                 me = month_data[month_data['Debit'] > 0].copy()
                 if not me.empty:
                     me['Category'] = me.apply(categorize_expense, axis=1)
                     ep = me.groupby('Category')['Debit'].sum().reset_index()
-                    total_monthly = ep['Debit'].sum() # סה"כ לחודש
+                    total_monthly = ep['Debit'].sum()
                     
                     fig_me = px.pie(ep, values='Debit', names='Category', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig_me.update_layout(showlegend=True, legend=dict(orientation="h"), margin=dict(t=0, b=0, l=0, r=0), height=300)
                     st.plotly_chart(fig_me, use_container_width=True)
-                    
-                    # הצגת הסה"כ מתחת לגרף
                     st.metric("סה\"כ הוצאות לחודש זה:", f"{total_monthly:,.0f} ₪")
                 else:
                     st.info("אין הוצאות בחודש זה.")
             else:
                 st.info("אין נתונים.")
 
-        # --- שמאל (החדש): הוצאות חשמל ---
+        # --- שמאל: הוצאות חשמל ---
         with col_row2_2:
-            st.caption("הוצאות חשמל")
+            st.subheader("הוצאות חשמל")
             is_elec = df_filtered['Action'].str.contains('חשמל', na=False) | df_filtered['Details'].str.contains('חשמל', na=False) | df_filtered['Beneficiary'].str.contains('חשמל', na=False)
             el_df = df_filtered[is_elec & (df_filtered['Debit'] > 0)]
             if not el_df.empty:
@@ -260,20 +257,17 @@ if uploaded_file is not None:
             expense_df['Category'] = expense_df.apply(categorize_expense, axis=1)
             cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
             
-            # --- עוגה כללית ---
             with col_pie1:
-                st.caption("כלל ההוצאות")
+                st.subheader("כלל ההוצאות")
                 total_general = cat_summary['Debit'].sum()
                 fig_p1 = px.pie(cat_summary, values='Debit', names='Category', hole=0.3)
                 fig_p1.update_traces(textposition='inside', textinfo='percent+label')
                 fig_p1.update_layout(showlegend=True, legend=dict(orientation="h"))
                 st.plotly_chart(fig_p1, use_container_width=True)
-                # סה"כ
                 st.metric("סה\"כ הוצאות:", f"{total_general:,.0f} ₪")
             
-            # --- עוגה ללא גז ---
             with col_pie2:
-                st.caption("הוצאות ללא גז")
+                st.subheader("הוצאות ללא גז")
                 no_gas_df = cat_summary[cat_summary['Category'] != 'גז ניהול מבנים']
                 if not no_gas_df.empty:
                     total_no_gas = no_gas_df['Debit'].sum()
@@ -282,10 +276,9 @@ if uploaded_file is not None:
                     fig_p2.update_traces(textposition='inside', textinfo='percent+label')
                     fig_p2.update_layout(showlegend=True, legend=dict(orientation="h"))
                     st.plotly_chart(fig_p2, use_container_width=True)
-                    # סה"כ
                     st.metric("סה\"כ (ללא גז):", f"{total_no_gas:,.0f} ₪")
                 else:
-                    st.info("אין הוצאות נוספות מלבד גז (או אין נתוני גז להחריג).")
+                    st.info("אין הוצאות נוספות מלבד גז.")
         else:
             st.info("אין נתוני הוצאות.")
 
@@ -297,7 +290,7 @@ if uploaded_file is not None:
 
         # --- דוח חריגים שנתי ---
         with st.expander("⚠️ דוח חריגים שנתי (בדיקת תשלום חכם)", expanded=True):
-            st.caption("בדיקת חובות לשנה נבחרת (כולל משפחות שלא שילמו כלל).")
+            st.subheader("בדיקת חובות לשנה נבחרת")
             
             last_data_date = df['Date'].max()
             last_data_year = last_data_date.year
