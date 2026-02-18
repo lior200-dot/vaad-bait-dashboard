@@ -6,7 +6,7 @@ import io
 
 # --- הגדרות עמוד ---
 st.set_page_config(page_title="דשבורד ועד בית", layout="wide")
-st.title("🏠 דשבורד ניהול כספי - ועד בית אור החיים 5")
+st.title("🏠 דשבורד ניהול כספי - ועד בית")
 
 # --- אתחול Session State ---
 if 'merge_map' not in st.session_state:
@@ -217,9 +217,9 @@ if uploaded_file is not None:
             else:
                 st.info("אין הוצאות חשמל בתקופה זו.")
 
-        # --- גרף 4: פירוט חודשי ממוקד (עם Legend) ---
+        # --- גרף 4: פירוט חודשי ממוקד (רק הוצאות + סה"כ) ---
         with col_row2_2:
-            st.caption("פירוט חודשי ממוקד")
+            st.caption("פירוט חודשי ממוקד (הוצאות)")
             unique_periods = df_filtered['Date'].dt.to_period('M').unique()
             sorted_periods = sorted(unique_periods, reverse=True)
             available_months = [p.strftime('%m/%Y') for p in sorted_periods]
@@ -228,31 +228,21 @@ if uploaded_file is not None:
                 selected_month = st.selectbox("בחר חודש:", available_months, label_visibility="collapsed")
                 month_data = df_filtered[df_filtered['Month'] == selected_month]
                 
-                m1, m2 = st.columns(2)
-                with m1:
-                    st.caption("הכנסות")
-                    mi = month_data[month_data['Credit'] > 0]
-                    if not mi.empty:
-                        ip = mi.groupby('Beneficiary')['Credit'].sum().reset_index()
-                        fig_mi = px.pie(ip, values='Credit', names='Beneficiary', hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
-                        # כאן התיקון: Legend דלוק ואופקי
-                        fig_mi.update_layout(showlegend=True, legend=dict(orientation="h"), margin=dict(t=0, b=0, l=0, r=0), height=300)
-                        st.plotly_chart(fig_mi, use_container_width=True)
-                    else:
-                        st.info("-")
-                
-                with m2:
-                    st.caption("הוצאות")
-                    me = month_data[month_data['Debit'] > 0].copy()
-                    if not me.empty:
-                        me['Category'] = me.apply(categorize_expense, axis=1)
-                        ep = me.groupby('Category')['Debit'].sum().reset_index()
-                        fig_me = px.pie(ep, values='Debit', names='Category', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                        # כאן התיקון: Legend דלוק ואופקי
-                        fig_me.update_layout(showlegend=True, legend=dict(orientation="h"), margin=dict(t=0, b=0, l=0, r=0), height=300)
-                        st.plotly_chart(fig_me, use_container_width=True)
-                    else:
-                        st.info("-")
+                # חישוב וסינון הוצאות לחודש
+                me = month_data[month_data['Debit'] > 0].copy()
+                if not me.empty:
+                    me['Category'] = me.apply(categorize_expense, axis=1)
+                    ep = me.groupby('Category')['Debit'].sum().reset_index()
+                    total_monthly = ep['Debit'].sum() # סה"כ לחודש
+                    
+                    fig_me = px.pie(ep, values='Debit', names='Category', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                    fig_me.update_layout(showlegend=True, legend=dict(orientation="h"), margin=dict(t=0, b=0, l=0, r=0), height=300)
+                    st.plotly_chart(fig_me, use_container_width=True)
+                    
+                    # הצגת הסה"כ מתחת לגרף
+                    st.metric("סה\"כ הוצאות לחודש זה:", f"{total_monthly:,.0f} ₪")
+                else:
+                    st.info("אין הוצאות בחודש זה.")
             else:
                 st.info("אין נתונים.")
 
@@ -270,22 +260,30 @@ if uploaded_file is not None:
             expense_df['Category'] = expense_df.apply(categorize_expense, axis=1)
             cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
             
+            # --- עוגה כללית ---
             with col_pie1:
                 st.caption("כלל ההוצאות")
+                total_general = cat_summary['Debit'].sum()
                 fig_p1 = px.pie(cat_summary, values='Debit', names='Category', hole=0.3)
                 fig_p1.update_traces(textposition='inside', textinfo='percent+label')
                 fig_p1.update_layout(showlegend=True, legend=dict(orientation="h"))
                 st.plotly_chart(fig_p1, use_container_width=True)
+                # סה"כ
+                st.metric("סה\"כ הוצאות:", f"{total_general:,.0f} ₪")
             
+            # --- עוגה ללא גז ---
             with col_pie2:
                 st.caption("הוצאות ללא גז")
                 no_gas_df = cat_summary[cat_summary['Category'] != 'גז ניהול מבנים']
                 if not no_gas_df.empty:
+                    total_no_gas = no_gas_df['Debit'].sum()
                     fig_p2 = px.pie(no_gas_df, values='Debit', names='Category', hole=0.3,
                                     color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig_p2.update_traces(textposition='inside', textinfo='percent+label')
                     fig_p2.update_layout(showlegend=True, legend=dict(orientation="h"))
                     st.plotly_chart(fig_p2, use_container_width=True)
+                    # סה"כ
+                    st.metric("סה\"כ (ללא גז):", f"{total_no_gas:,.0f} ₪")
                 else:
                     st.info("אין הוצאות נוספות מלבד גז (או אין נתוני גז להחריג).")
         else:
@@ -397,4 +395,3 @@ if uploaded_file is not None:
 
 else:
     st.info("אנא העלה קובץ אקסל.")
-
