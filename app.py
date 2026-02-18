@@ -6,7 +6,7 @@ import io
 
 # --- הגדרות עמוד ---
 st.set_page_config(page_title="דשבורד ועד בית", layout="wide")
-st.title("🏠 דשבורד ניהול כספי - ועד בית")
+st.title("🏠 דשבורד ניהול כספי - ועד בית אור החיים 5")
 
 # --- אתחול Session State ---
 if 'merge_map' not in st.session_state:
@@ -397,3 +397,4 @@ if uploaded_file is not None:
 
 else:
     st.info("אנא העלה קובץ אקסל.")
+
