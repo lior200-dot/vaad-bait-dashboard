@@ -198,27 +198,12 @@ if uploaded_file is not None:
             st.plotly_chart(fig, use_container_width=True)
 
         # ========================================================
-        #  חלק ב': ניתוח חשמל וחודשים
+        #  חלק ב': ניתוח חודשי וחשמל (הוחלפו הצדדים)
         # ========================================================
         col_row2_1, col_row2_2 = st.columns(2)
 
-        # --- גרף 3: הוצאות חשמל ---
+        # --- ימין (החדש): פירוט חודשי ממוקד ---
         with col_row2_1:
-            st.caption("הוצאות חשמל")
-            is_elec = df_filtered['Action'].str.contains('חשמל', na=False) | df_filtered['Details'].str.contains('חשמל', na=False) | df_filtered['Beneficiary'].str.contains('חשמל', na=False)
-            el_df = df_filtered[is_elec & (df_filtered['Debit'] > 0)]
-            if not el_df.empty:
-                mel = el_df.groupby('Month')['Debit'].sum().reset_index()
-                mel['SortDate'] = pd.to_datetime(mel['Month'], format='%m/%Y')
-                mel = mel.sort_values('SortDate')
-                fig = px.bar(mel, x='Month', y='Debit', text='Debit', color_discrete_sequence=['orange'])
-                fig.update_traces(texttemplate='%{text:.0f}', textposition='outside')
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("אין הוצאות חשמל בתקופה זו.")
-
-        # --- גרף 4: פירוט חודשי ממוקד (רק הוצאות + סה"כ) ---
-        with col_row2_2:
             st.caption("פירוט חודשי ממוקד (הוצאות)")
             unique_periods = df_filtered['Date'].dt.to_period('M').unique()
             sorted_periods = sorted(unique_periods, reverse=True)
@@ -245,6 +230,21 @@ if uploaded_file is not None:
                     st.info("אין הוצאות בחודש זה.")
             else:
                 st.info("אין נתונים.")
+
+        # --- שמאל (החדש): הוצאות חשמל ---
+        with col_row2_2:
+            st.caption("הוצאות חשמל")
+            is_elec = df_filtered['Action'].str.contains('חשמל', na=False) | df_filtered['Details'].str.contains('חשמל', na=False) | df_filtered['Beneficiary'].str.contains('חשמל', na=False)
+            el_df = df_filtered[is_elec & (df_filtered['Debit'] > 0)]
+            if not el_df.empty:
+                mel = el_df.groupby('Month')['Debit'].sum().reset_index()
+                mel['SortDate'] = pd.to_datetime(mel['Month'], format='%m/%Y')
+                mel = mel.sort_values('SortDate')
+                fig = px.bar(mel, x='Month', y='Debit', text='Debit', color_discrete_sequence=['orange'])
+                fig.update_traces(texttemplate='%{text:.0f}', textposition='outside')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("אין הוצאות חשמל בתקופה זו.")
 
         # ========================================================
         #  חלק ג': פילוח קטגוריות
