@@ -168,10 +168,10 @@ if uploaded_file is not None:
         st.success(f"מציג נתונים בגרפים בין {start_date} ל-{end_date}")
 
         # ========================================================
-        #  דוח משפחות טעונות בדיקה (לפי שנים)
+        #  ⚠️ דוח משפחות טעונות בדיקה (כולל אפס תשלומים)
         # ========================================================
         with st.expander("⚠️ דוח חריגים שנתי (בדיקת תשלום חכם)", expanded=True):
-            st.caption("בדיקת חובות לשנה נבחרת. לשנה הנוכחית - עד תאריך הנתונים האחרון.")
+            st.caption("בדיקת חובות לשנה נבחרת. כולל משפחות שלא שילמו כלל בתקופה זו.")
             
             last_data_date = df['Date'].max()
             last_data_year = last_data_date.year
@@ -204,24 +204,37 @@ if uploaded_file is not None:
                 
                 st.info(f"🔎 בדיקה לשנת **{selected_year}** ({limit_msg}). יעד: **{expected_total:,.0f} ₪**")
 
+                # 1. יצירת רשימת כל המשפחות הפעילות (ששילמו אי פעם)
+                # זה מבטיח שגם מי שלא שילם השנה יופיע ברשימה
+                all_ever_payers = df[df['Credit'] > 0]['Beneficiary'].unique()
+                all_families_df = pd.DataFrame({'Beneficiary': all_ever_payers})
+
+                # 2. סיכום תשלומים לשנה הנבחרת
                 audit_mask = (df['Date'] >= search_start) & (df['Date'] <= search_end)
                 audit_df = df.loc[audit_mask]
                 
-                if not audit_df.empty:
-                    audit_income = audit_df[audit_df['Credit'] > 0].groupby('Beneficiary')['Credit'].sum().reset_index()
-                    audit_income['Expected'] = expected_total
-                    audit_income['Gap'] = audit_income['Expected'] - audit_income['Credit']
-                    
-                    flagged = audit_income[audit_income['Gap'] > tolerance].sort_values('Gap', ascending=False)
-                    
-                    if not flagged.empty:
-                        st.error(f"נמצאו {len(flagged)} חריגות!")
-                        flagged = flagged.rename(columns={'Beneficiary': 'משפחה', 'Credit': 'שולם', 'Expected': 'צפי', 'Gap': 'חוב'})
-                        st.dataframe(flagged[['משפחה', 'שולם', 'צפי', 'חוב']], use_container_width=True)
-                    else:
-                        st.success(f"✅ כל המשפחות עמדו ביעד לשנת {selected_year}.")
+                # קיבוץ לפי משפחה רק עבור השנה הזו
+                yearly_payments = audit_df[audit_df['Credit'] > 0].groupby('Beneficiary')['Credit'].sum().reset_index()
+                
+                # 3. מיזוג (Left Join) - כך שכל המשפחות יופיעו, גם אם לא שילמו השנה
+                merged_audit = pd.merge(all_families_df, yearly_payments, on='Beneficiary', how='left')
+                
+                # מילוי אפסים למי שלא שילם כלום השנה
+                merged_audit['Credit'] = merged_audit['Credit'].fillna(0)
+                
+                # חישוב הפער
+                merged_audit['Expected'] = expected_total
+                merged_audit['Gap'] = merged_audit['Expected'] - merged_audit['Credit']
+                
+                # סינון חריגים
+                flagged = merged_audit[merged_audit['Gap'] > tolerance].sort_values('Gap', ascending=False)
+                
+                if not flagged.empty:
+                    st.error(f"נמצאו {len(flagged)} משפחות עם חוסר בתשלום!")
+                    flagged = flagged.rename(columns={'Beneficiary': 'משפחה', 'Credit': 'שולם בפועל', 'Expected': 'צפי', 'Gap': 'חוב'})
+                    st.dataframe(flagged[['משפחה', 'שולם בפועל', 'צפי', 'חוב']], use_container_width=True)
                 else:
-                    st.warning("לא נמצאו נתונים בטווח זה.")
+                    st.success(f"✅ כל המשפחות עמדו ביעד לשנת {selected_year}.")
 
         # ========================================================
         #  הגרפים הראשיים
@@ -275,7 +288,7 @@ if uploaded_file is not None:
                 st.info("אין הכנסות.")
 
         # ========================================================
-        #  פילוח הוצאות (שהיה חסר)
+        #  פילוח הוצאות
         # ========================================================
         st.markdown("---")
         st.subheader("🍰 פילוח הוצאות (כללי)")
@@ -307,7 +320,7 @@ if uploaded_file is not None:
                     st.info("אין הוצאות נוספות מלבד גז.")
 
         # ========================================================
-        #  פירוט חודשי (שהיה חסר)
+        #  פירוט חודשי
         # ========================================================
         st.markdown("---")
         st.subheader("📅 פירוט חודשי ממוקד")
@@ -352,7 +365,7 @@ if uploaded_file is not None:
                     st.info("אין הוצאות בחודש זה.")
 
         # ========================================================
-        #  פירוט למשפחה (עם הגרף המשודרג)
+        #  פירוט למשפחה
         # ========================================================
         st.markdown("---")
         st.subheader("🔎 פירוט תשלומים למשפחה")
