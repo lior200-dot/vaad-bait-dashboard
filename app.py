@@ -217,7 +217,7 @@ if uploaded_file is not None:
             else:
                 st.info("אין הוצאות חשמל בתקופה זו.")
 
-        # --- גרף 4: פירוט חודשי ממוקד ---
+        # --- גרף 4: פירוט חודשי ממוקד (עם Legend) ---
         with col_row2_2:
             st.caption("פירוט חודשי ממוקד")
             unique_periods = df_filtered['Date'].dt.to_period('M').unique()
@@ -235,7 +235,8 @@ if uploaded_file is not None:
                     if not mi.empty:
                         ip = mi.groupby('Beneficiary')['Credit'].sum().reset_index()
                         fig_mi = px.pie(ip, values='Credit', names='Beneficiary', hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
-                        fig_mi.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=200)
+                        # כאן התיקון: Legend דלוק ואופקי
+                        fig_mi.update_layout(showlegend=True, legend=dict(orientation="h"), margin=dict(t=0, b=0, l=0, r=0), height=300)
                         st.plotly_chart(fig_mi, use_container_width=True)
                     else:
                         st.info("-")
@@ -247,7 +248,8 @@ if uploaded_file is not None:
                         me['Category'] = me.apply(categorize_expense, axis=1)
                         ep = me.groupby('Category')['Debit'].sum().reset_index()
                         fig_me = px.pie(ep, values='Debit', names='Category', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                        fig_me.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), height=200)
+                        # כאן התיקון: Legend דלוק ואופקי
+                        fig_me.update_layout(showlegend=True, legend=dict(orientation="h"), margin=dict(t=0, b=0, l=0, r=0), height=300)
                         st.plotly_chart(fig_me, use_container_width=True)
                     else:
                         st.info("-")
@@ -255,7 +257,7 @@ if uploaded_file is not None:
                 st.info("אין נתונים.")
 
         # ========================================================
-        #  חלק ג': פילוח קטגוריות (עם וללא גז)
+        #  חלק ג': פילוח קטגוריות
         # ========================================================
         st.markdown("---")
         st.subheader("🍰 פילוח הוצאות לפי קטגוריות")
@@ -268,7 +270,6 @@ if uploaded_file is not None:
             expense_df['Category'] = expense_df.apply(categorize_expense, axis=1)
             cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
             
-            # --- עוגה כללית ---
             with col_pie1:
                 st.caption("כלל ההוצאות")
                 fig_p1 = px.pie(cat_summary, values='Debit', names='Category', hole=0.3)
@@ -276,7 +277,6 @@ if uploaded_file is not None:
                 fig_p1.update_layout(showlegend=True, legend=dict(orientation="h"))
                 st.plotly_chart(fig_p1, use_container_width=True)
             
-            # --- עוגה ללא גז (החלק שביקשת להחזיר) ---
             with col_pie2:
                 st.caption("הוצאות ללא גז")
                 no_gas_df = cat_summary[cat_summary['Category'] != 'גז ניהול מבנים']
