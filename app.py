@@ -168,80 +168,15 @@ if uploaded_file is not None:
         st.success(f"מציג נתונים בגרפים בין {start_date} ל-{end_date}")
 
         # ========================================================
-        #  ⚠️ דוח משפחות טעונות בדיקה (כולל אפס תשלומים)
+        #  חלק א': מבט על - הוצאות והכנסות
         # ========================================================
-        with st.expander("⚠️ דוח חריגים שנתי (בדיקת תשלום חכם)", expanded=True):
-            st.caption("בדיקת חובות לשנה נבחרת. כולל משפחות שלא שילמו כלל בתקופה זו.")
-            
-            last_data_date = df['Date'].max()
-            last_data_year = last_data_date.year
-            years = df['Date'].dt.year.dropna().unique()
-            available_years = sorted(years.astype(int), reverse=True)
-            
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                selected_year = st.selectbox("בחר שנה לבדיקה:", available_years)
-            with c2:
-                monthly_fee = st.number_input("סכום ועד חודשי (₪):", value=250, step=10)
-            with c3:
-                tolerance = st.number_input("להתעלם מחוב קטן מ- (₪):", value=50)
-
-            if selected_year:
-                year_start = datetime(selected_year, 1, 1)
-                
-                if selected_year == last_data_year:
-                    year_end = last_data_date
-                    limit_msg = f"עד התאריך האחרון ({year_end.strftime('%d/%m/%Y')})"
-                else:
-                    year_end = datetime(selected_year, 12, 31)
-                    limit_msg = "שנה מלאה"
-
-                search_start = year_start - timedelta(days=10)
-                search_end = year_end + timedelta(days=10)
-                
-                months_count = (year_end.year - year_start.year) * 12 + (year_end.month - year_start.month) + 1
-                expected_total = months_count * monthly_fee
-                
-                st.info(f"🔎 בדיקה לשנת **{selected_year}** ({limit_msg}). יעד: **{expected_total:,.0f} ₪**")
-
-                # 1. יצירת רשימת כל המשפחות הפעילות (ששילמו אי פעם)
-                # זה מבטיח שגם מי שלא שילם השנה יופיע ברשימה
-                all_ever_payers = df[df['Credit'] > 0]['Beneficiary'].unique()
-                all_families_df = pd.DataFrame({'Beneficiary': all_ever_payers})
-
-                # 2. סיכום תשלומים לשנה הנבחרת
-                audit_mask = (df['Date'] >= search_start) & (df['Date'] <= search_end)
-                audit_df = df.loc[audit_mask]
-                
-                # קיבוץ לפי משפחה רק עבור השנה הזו
-                yearly_payments = audit_df[audit_df['Credit'] > 0].groupby('Beneficiary')['Credit'].sum().reset_index()
-                
-                # 3. מיזוג (Left Join) - כך שכל המשפחות יופיעו, גם אם לא שילמו השנה
-                merged_audit = pd.merge(all_families_df, yearly_payments, on='Beneficiary', how='left')
-                
-                # מילוי אפסים למי שלא שילם כלום השנה
-                merged_audit['Credit'] = merged_audit['Credit'].fillna(0)
-                
-                # חישוב הפער
-                merged_audit['Expected'] = expected_total
-                merged_audit['Gap'] = merged_audit['Expected'] - merged_audit['Credit']
-                
-                # סינון חריגים
-                flagged = merged_audit[merged_audit['Gap'] > tolerance].sort_values('Gap', ascending=False)
-                
-                if not flagged.empty:
-                    st.error(f"נמצאו {len(flagged)} משפחות עם חוסר בתשלום!")
-                    flagged = flagged.rename(columns={'Beneficiary': 'משפחה', 'Credit': 'שולם בפועל', 'Expected': 'צפי', 'Gap': 'חוב'})
-                    st.dataframe(flagged[['משפחה', 'שולם בפועל', 'צפי', 'חוב']], use_container_width=True)
-                else:
-                    st.success(f"✅ כל המשפחות עמדו ביעד לשנת {selected_year}.")
-
-        # ========================================================
-        #  הגרפים הראשיים
-        # ========================================================
-        col_top1, col_top2 = st.columns(2)
-        with col_top1:
-            st.subheader("⚖️ הכנסות מול הוצאות")
+        st.subheader("📊 מבט על: הוצאות והכנסות")
+        
+        col_row1_1, col_row1_2 = st.columns(2)
+        
+        # --- גרף 1: הכנסות מול הוצאות ---
+        with col_row1_1:
+            st.caption("הכנסות מול הוצאות (חודשי)")
             if not df_filtered.empty:
                 ms = df_filtered.copy()
                 ms['MonthDate'] = ms['Date'].dt.to_period('M')
@@ -254,16 +189,19 @@ if uploaded_file is not None:
                 fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
                 st.plotly_chart(fig, use_container_width=True)
 
-        with col_top2:
-            st.subheader("💰 מגמת יתרה")
+        # --- גרף 2: מגמת יתרה ---
+        with col_row1_2:
+            st.caption("מגמת יתרה מצטברת")
             df_srt = df_filtered.sort_values('Date')
             fig = px.line(df_srt, x='Date', y='Balance', color_discrete_sequence=['purple'])
             fig.update_layout(yaxis=dict(tickformat=",.0f"))
             st.plotly_chart(fig, use_container_width=True)
 
-        col_mid1, col_mid2 = st.columns(2)
-        with col_mid1:
-            st.subheader("⚡ הוצאות חשמל")
+        col_row2_1, col_row2_2 = st.columns(2)
+
+        # --- גרף 3: הוצאות חשמל ---
+        with col_row2_1:
+            st.caption("הוצאות חשמל")
             is_elec = df_filtered['Action'].str.contains('חשמל', na=False) | df_filtered['Details'].str.contains('חשמל', na=False) | df_filtered['Beneficiary'].str.contains('חשמל', na=False)
             el_df = df_filtered[is_elec & (df_filtered['Debit'] > 0)]
             if not el_df.empty:
@@ -274,54 +212,23 @@ if uploaded_file is not None:
                 fig.update_traces(texttemplate='%{text:.0f}', textposition='outside')
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("אין הוצאות חשמל.")
+                st.info("אין הוצאות חשמל בתקופה זו.")
 
-        with col_mid2:
-            st.subheader("🏆 סיכום תשלומים")
-            inc_df = df_filtered[df_filtered['Credit'] > 0]
-            if not inc_df.empty:
-                tpf = inc_df.groupby('Beneficiary')['Credit'].sum().reset_index().sort_values('Beneficiary')
-                fig = px.bar(tpf, x='Beneficiary', y='Credit', text='Credit', color_discrete_sequence=['teal'])
-                fig.update_traces(texttemplate='%{text:.0f}', textposition='outside')
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("אין הכנסות.")
-
-        # ========================================================
-        #  פילוח הוצאות
-        # ========================================================
-        st.markdown("---")
-        st.subheader("🍰 פילוח הוצאות (כללי)")
-        expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
-        
-        if not expense_df.empty:
-            expense_df['Category'] = expense_df.apply(categorize_expense, axis=1)
-            cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
-            
-            p_col1, p_col2 = st.columns(2)
-            
-            with p_col1:
-                st.caption("כלל ההוצאות")
+        # --- גרף 4: פילוח הוצאות (כללי) ---
+        with col_row2_2:
+            st.caption("פילוח הוצאות (כללי)")
+            expense_df = df_filtered[df_filtered['Debit'] > 0].copy()
+            if not expense_df.empty:
+                expense_df['Category'] = expense_df.apply(categorize_expense, axis=1)
+                cat_summary = expense_df.groupby('Category')['Debit'].sum().reset_index()
                 fig_p1 = px.pie(cat_summary, values='Debit', names='Category', hole=0.3)
                 fig_p1.update_traces(textposition='inside', textinfo='percent+label')
                 fig_p1.update_layout(showlegend=True, legend=dict(orientation="h"))
                 st.plotly_chart(fig_p1, use_container_width=True)
-            
-            with p_col2:
-                st.caption("הוצאות ללא גז")
-                no_gas_df = cat_summary[cat_summary['Category'] != 'גז ניהול מבנים']
-                if not no_gas_df.empty:
-                    fig_p2 = px.pie(no_gas_df, values='Debit', names='Category', hole=0.3,
-                                    color_discrete_sequence=px.colors.qualitative.Pastel)
-                    fig_p2.update_traces(textposition='inside', textinfo='percent+label')
-                    fig_p2.update_layout(showlegend=True, legend=dict(orientation="h"))
-                    st.plotly_chart(fig_p2, use_container_width=True)
-                else:
-                    st.info("אין הוצאות נוספות מלבד גז.")
+            else:
+                st.info("אין נתוני הוצאות.")
 
-        # ========================================================
-        #  פירוט חודשי
-        # ========================================================
+        # --- גרף 5: פירוט חודשי ממוקד ---
         st.markdown("---")
         st.subheader("📅 פירוט חודשי ממוקד")
         
@@ -365,9 +272,69 @@ if uploaded_file is not None:
                     st.info("אין הוצאות בחודש זה.")
 
         # ========================================================
-        #  פירוט למשפחה
+        #  חלק ב': פירוט וחריגים
         # ========================================================
         st.markdown("---")
+        st.header("📋 דוחות מפורטים וחריגים")
+
+        # --- דוח חריגים שנתי ---
+        with st.expander("⚠️ דוח חריגים שנתי (בדיקת תשלום חכם)", expanded=True):
+            st.caption("בדיקת חובות לשנה נבחרת (כולל משפחות שלא שילמו כלל).")
+            
+            last_data_date = df['Date'].max()
+            last_data_year = last_data_date.year
+            years = df['Date'].dt.year.dropna().unique()
+            available_years = sorted(years.astype(int), reverse=True)
+            
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                selected_year = st.selectbox("בחר שנה לבדיקה:", available_years)
+            with c2:
+                monthly_fee = st.number_input("סכום ועד חודשי (₪):", value=250, step=10)
+            with c3:
+                tolerance = st.number_input("להתעלם מחוב קטן מ- (₪):", value=50)
+
+            if selected_year:
+                year_start = datetime(selected_year, 1, 1)
+                
+                if selected_year == last_data_year:
+                    year_end = last_data_date
+                    limit_msg = f"עד התאריך האחרון ({year_end.strftime('%d/%m/%Y')})"
+                else:
+                    year_end = datetime(selected_year, 12, 31)
+                    limit_msg = "שנה מלאה"
+
+                search_start = year_start - timedelta(days=10)
+                search_end = year_end + timedelta(days=10)
+                
+                months_count = (year_end.year - year_start.year) * 12 + (year_end.month - year_start.month) + 1
+                expected_total = months_count * monthly_fee
+                
+                st.info(f"🔎 בדיקה לשנת **{selected_year}** ({limit_msg}). יעד: **{expected_total:,.0f} ₪**")
+
+                all_ever_payers = df[df['Credit'] > 0]['Beneficiary'].unique()
+                all_families_df = pd.DataFrame({'Beneficiary': all_ever_payers})
+
+                audit_mask = (df['Date'] >= search_start) & (df['Date'] <= search_end)
+                audit_df = df.loc[audit_mask]
+                
+                yearly_payments = audit_df[audit_df['Credit'] > 0].groupby('Beneficiary')['Credit'].sum().reset_index()
+                merged_audit = pd.merge(all_families_df, yearly_payments, on='Beneficiary', how='left')
+                merged_audit['Credit'] = merged_audit['Credit'].fillna(0)
+                
+                merged_audit['Expected'] = expected_total
+                merged_audit['Gap'] = merged_audit['Expected'] - merged_audit['Credit']
+                
+                flagged = merged_audit[merged_audit['Gap'] > tolerance].sort_values('Gap', ascending=False)
+                
+                if not flagged.empty:
+                    st.error(f"נמצאו {len(flagged)} משפחות עם חוסר בתשלום!")
+                    flagged = flagged.rename(columns={'Beneficiary': 'משפחה', 'Credit': 'שולם בפועל', 'Expected': 'צפי', 'Gap': 'חוב'})
+                    st.dataframe(flagged[['משפחה', 'שולם בפועל', 'צפי', 'חוב']], use_container_width=True)
+                else:
+                    st.success(f"✅ כל המשפחות עמדו ביעד לשנת {selected_year}.")
+
+        # --- פירוט תשלומים למשפחה ---
         st.subheader("🔎 פירוט תשלומים למשפחה")
         pf = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
         if pf:
