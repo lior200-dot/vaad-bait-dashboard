@@ -290,13 +290,14 @@ if uploaded_file is not None:
 
         # --- דוח חריגים שנתי ---
         with st.expander("⚠️ דוח חריגים שנתי (בדיקת תשלום חכם)", expanded=True):
-            st.subheader("בדיקת חובות לשנה נבחרת")
+            st.caption("בדיקת חובות לשנה נבחרת. ניתן להגדיר חלונות זמן לבדיקה לפני/אחרי השנה הקלנדרית.")
             
             last_data_date = df['Date'].max()
             last_data_year = last_data_date.year
             years = df['Date'].dt.year.dropna().unique()
             available_years = sorted(years.astype(int), reverse=True)
             
+            # שורה ראשונה: הגדרות כלליות
             c1, c2, c3 = st.columns(3)
             with c1:
                 selected_year = st.selectbox("בחר שנה לבדיקה:", available_years)
@@ -305,31 +306,51 @@ if uploaded_file is not None:
             with c3:
                 tolerance = st.number_input("להתעלם מחוב קטן מ- (₪):", value=50)
 
+            # שורה שנייה: הגדרות מרווח ביטחון מפוצלות
+            st.markdown("---")
+            st.write("🛠️ **הרחבת טווח חיפוש תשלומים:**")
+            d1, d2 = st.columns(2)
+            with d1:
+                days_before = st.number_input("כמה ימים לבדוק **לפני** תחילת השנה (למשל סוף דצמבר)?", min_value=0, value=0)
+            with d2:
+                days_after = st.number_input("כמה ימים לבדוק **אחרי** סוף השנה (למשל תחילת ינואר)?", min_value=0, value=0)
+
             if selected_year:
                 year_start = datetime(selected_year, 1, 1)
                 
+                # חישוב תאריך סיום השנה
                 if selected_year == last_data_year:
+                    # אם זו השנה הנוכחית, אנחנו בודקים עד התאריך האחרון שיש בדאטה
                     year_end = last_data_date
-                    limit_msg = f"עד התאריך האחרון ({year_end.strftime('%d/%m/%Y')})"
+                    limit_msg = f"עד התאריך האחרון בקובץ ({year_end.strftime('%d/%m/%Y')})"
                 else:
+                    # אם זו שנה קודמת, בודקים עד 31 בדצמבר
                     year_end = datetime(selected_year, 12, 31)
-                    limit_msg = "שנה מלאה"
+                    limit_msg = "שנה מלאה (1.1 - 31.12)"
 
-                search_start = year_start - timedelta(days=10)
-                search_end = year_end + timedelta(days=10)
+                # חישוב טווחי החיפוש בפועל (כולל המרווחים)
+                search_start = year_start - timedelta(days=days_before)
+                search_end = year_end + timedelta(days=days_after)
                 
+                # חישוב יעד הגבייה:
+                # לוקחים את מספר החודשים בתוך הטווח ה"רשמי" (year_start עד year_end)
                 months_count = (year_end.year - year_start.year) * 12 + (year_end.month - year_start.month) + 1
                 expected_total = months_count * monthly_fee
                 
-                st.info(f"🔎 בדיקה לשנת **{selected_year}** ({limit_msg}). יעד: **{expected_total:,.0f} ₪**")
+                st.info(f"🔎 בדיקה לשנת **{selected_year}** ({limit_msg}).\n"
+                        f"📅 צפי לחיוב: **{months_count}** חודשים | סכום יעד: **{expected_total:,.0f} ₪**\n"
+                        f"🛡️ מחפש בפועל תשלומים שבוצעו בין **{search_start.strftime('%d/%m/%y')}** ל-**{search_end.strftime('%d/%m/%y')}**.")
 
                 all_ever_payers = df[df['Credit'] > 0]['Beneficiary'].unique()
                 all_families_df = pd.DataFrame({'Beneficiary': all_ever_payers})
 
+                # סינון הדאטה לפי טווח החיפוש המורחב
                 audit_mask = (df['Date'] >= search_start) & (df['Date'] <= search_end)
                 audit_df = df.loc[audit_mask]
                 
                 yearly_payments = audit_df[audit_df['Credit'] > 0].groupby('Beneficiary')['Credit'].sum().reset_index()
+                
+                # מיזוג כדי לכלול גם משפחות שלא שילמו כלל
                 merged_audit = pd.merge(all_families_df, yearly_payments, on='Beneficiary', how='left')
                 merged_audit['Credit'] = merged_audit['Credit'].fillna(0)
                 
