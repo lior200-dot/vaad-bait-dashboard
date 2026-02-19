@@ -94,14 +94,20 @@ def display_family_history(family_name, df_full, start_date, end_date, hide_miss
         fig.update_layout(xaxis=dict(tickmode='array', tickvals=gdf['RowID'], ticktext=gdf['Month']), 
                           yaxis=dict(range=[0, mc*1.2]), showlegend=False, bargap=0.3, height=350)
         fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside', cliponaxis=False)
-        # החלת טקסט ריק על עמודות עם 0 אם אנחנו מציגים חודשים חסרים
         if not hide_missing_months:
             fig.for_each_trace(lambda t: t.update(text=[v if v>0 else "" for v in t.y]))
-        st.plotly_chart(fig, use_container_width=True)
+        
+        # --- התיקון כאן: תוספת מזהה ייחודי key ---
+        st.plotly_chart(fig, use_container_width=True, key=f"chart_{family_name}")
+    else:
+        st.info("אין תשלומים להצגה בטווח זה.")
     
     tdf = ap[['Date', 'Credit', 'Details', 'Action']].copy()
     tdf['Date'] = tdf['Date'].dt.strftime('%d/%m/%Y')
-    st.dataframe(tdf, use_container_width=True, hide_index=True)
+    
+    # --- התיקון כאן: תוספת מזהה ייחודי key ---
+    st.dataframe(tdf, use_container_width=True, hide_index=True, key=f"table_{family_name}")
+    
     st.write(f"**סה\"כ שולם ע\"י {family_name}:** {ap['Credit'].sum():,.0f} ₪")
     st.markdown("---")
 
@@ -113,7 +119,9 @@ if uploaded_file is not None:
     df = load_data(uploaded_file)
     
     if not df.empty:
+        # ==========================================
         # 1. שיוך תשלומים ידני
+        # ==========================================
         st.sidebar.markdown("---")
         with st.sidebar.expander("✍️ שיוך תשלומים ידני", expanded=False):
             st.caption("שיוך הפקדות ללא שם למשפחה ספציפית.")
@@ -136,7 +144,9 @@ if uploaded_file is not None:
         for idx, new_name in st.session_state['manual_tags'].items():
             df.loc[df['OriginalIndex'] == idx, 'Beneficiary'] = new_name
 
+        # ==========================================
         # 2. איחוד משפחות
+        # ==========================================
         st.sidebar.markdown("---")
         with st.sidebar.expander("🔗 איחוד שמות ומשפחות", expanded=False):
             all_beneficiaries = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
@@ -154,7 +164,9 @@ if uploaded_file is not None:
         if st.session_state['merge_map']:
             df['Beneficiary'] = df['Beneficiary'].replace(st.session_state['merge_map'])
 
+        # ==========================================
         # 3. סינון תאריכים
+        # ==========================================
         st.sidebar.markdown("---")
         st.sidebar.header("סינון תאריכים לגרפים")
         min_date = df['Date'].min().date()
@@ -163,7 +175,9 @@ if uploaded_file is not None:
         end_date = st.sidebar.date_input("תאריך סיום", max_date)
         df_filtered = df.loc[(df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)]
 
-        # 4. ייצוא
+        # ==========================================
+        # 4. ייצוא לאקסל
+        # ==========================================
         st.sidebar.markdown("---")
         try:
             buffer = io.BytesIO()
@@ -171,7 +185,11 @@ if uploaded_file is not None:
             st.sidebar.download_button("📥 הורד אקסל מעובד", buffer, "vaad_data.xlsx")
         except: pass
 
-        # --- חלק א': מבט על ---
+        st.success(f"מציג נתונים בגרפים בין {start_date} ל-{end_date}")
+
+        # ========================================================
+        #  חלק א': מבט על - הוצאות והכנסות
+        # ========================================================
         st.subheader("📊 מבט על: הוצאות והכנסות")
         c_r1_1, c_r1_2 = st.columns(2)
         with c_r1_1:
@@ -189,6 +207,9 @@ if uploaded_file is not None:
             fig = px.line(df_filtered.sort_values('Date'), x='Date', y='Balance', color_discrete_sequence=['purple'])
             fig.update_layout(yaxis=dict(tickformat=",.0f")); st.plotly_chart(fig, use_container_width=True)
 
+        # ========================================================
+        #  חלק ב': ניתוח חודשי וחשמל
+        # ========================================================
         c_r2_1, c_r2_2 = st.columns(2)
         with c_r2_1:
             st.subheader("פירוט חודשי ממוקד (הוצאות)")
@@ -202,7 +223,8 @@ if uploaded_file is not None:
                     ep = me.groupby('Category')['Debit'].sum().reset_index()
                     fig = px.pie(ep, values='Debit', names='Category', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig.update_layout(showlegend=True, legend=dict(orientation="h"), height=300); st.plotly_chart(fig, use_container_width=True)
-                    st.metric("סה\"כ הוצאות:", f"{ep['Debit'].sum():,.0f} ₪")
+                    st.metric("סה\"כ הוצאות לחודש זה:", f"{ep['Debit'].sum():,.0f} ₪")
+                else: st.info("אין הוצאות בחודש זה.")
         with c_r2_2:
             st.subheader("הוצאות חשמל")
             is_elec = df_filtered['Action'].str.contains('חשמל', na=False) | df_filtered['Details'].str.contains('חשמל', na=False)
@@ -213,7 +235,11 @@ if uploaded_file is not None:
                 mel = mel.sort_values('SortDate')
                 fig = px.bar(mel, x='Month', y='Debit', text='Debit', color_discrete_sequence=['orange'])
                 fig.update_traces(texttemplate='%{text:.0f}', textposition='outside'); st.plotly_chart(fig, use_container_width=True)
+            else: st.info("אין הוצאות חשמל בתקופה זו.")
 
+        # ========================================================
+        #  חלק ג': פילוח קטגוריות
+        # ========================================================
         st.markdown("---")
         st.subheader("🍰 פילוח הוצאות לפי קטגוריות")
         c_p1, c_p2 = st.columns(2)
@@ -225,7 +251,7 @@ if uploaded_file is not None:
                 st.subheader("כלל ההוצאות")
                 fig = px.pie(cat_sum, values='Debit', names='Category', hole=0.3)
                 fig.update_layout(showlegend=True, legend=dict(orientation="h")); st.plotly_chart(fig, use_container_width=True)
-                st.metric("סה\"כ:", f"{cat_sum['Debit'].sum():,.0f} ₪")
+                st.metric("סה\"כ הוצאות:", f"{cat_sum['Debit'].sum():,.0f} ₪")
             with c_p2:
                 st.subheader("הוצאות ללא גז")
                 no_g = cat_sum[cat_sum['Category'] != 'גז ניהול מבנים']
@@ -233,8 +259,11 @@ if uploaded_file is not None:
                     fig = px.pie(no_g, values='Debit', names='Category', hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig.update_layout(showlegend=True, legend=dict(orientation="h")); st.plotly_chart(fig, use_container_width=True)
                     st.metric("סה\"כ (ללא גז):", f"{no_g['Debit'].sum():,.0f} ₪")
+                else: st.info("אין הוצאות נוספות מלבד גז.")
 
-        # --- חלק ד': דוחות וחריגים ---
+        # ========================================================
+        #  חלק ד': דוחות מפורטים וחריגים
+        # ========================================================
         st.markdown("---")
         st.header("📋 דוחות מפורטים וחריגים")
 
@@ -246,6 +275,9 @@ if uploaded_file is not None:
             with c1: sel_y = st.selectbox("שנה לבדיקה:", avail_years)
             with c2: m_fee = st.number_input("ועד חודשי:", value=250)
             with c3: tol = st.number_input("סובלנות חוב:", value=50)
+            
+            st.markdown("---")
+            st.write("🛠️ **הרחבת טווח חיפוש תשלומים:**")
             d1, d2 = st.columns(2)
             with d1: d_bef = st.number_input("ימים לפני:", value=0)
             with d2: d_aft = st.number_input("ימים אחרי:", value=0)
@@ -255,6 +287,8 @@ if uploaded_file is not None:
             m_count = (y_en.year - y_st.year) * 12 + (y_en.month - y_st.month) + 1
             exp_total = m_count * m_fee
             
+            st.info(f"🔎 בדיקה לשנת **{sel_y}** | צפי לחיוב: **{m_count}** חודשים | סכום יעד: **{exp_total:,.0f} ₪**\n🛡️ מחפש בפועל תשלומים שבוצעו בין **{s_st.strftime('%d/%m/%y')}** ל-**{s_en.strftime('%d/%m/%y')}**.")
+
             audit_mask = (df['Date'] >= s_st) & (df['Date'] <= s_en)
             audit_df = df.loc[audit_mask]
             all_p = pd.DataFrame({'Beneficiary': df[df['Credit'] > 0]['Beneficiary'].unique()})
@@ -264,7 +298,8 @@ if uploaded_file is not None:
             flagged = m_audit[m_audit['Gap'] > tol].sort_values('Gap', ascending=False)
             
             if not flagged.empty: 
-                st.dataframe(flagged.rename(columns={'Credit': 'שולם', 'Gap': 'חוב'}), use_container_width=True)
+                st.error(f"נמצאו {len(flagged)} משפחות עם חוסר בתשלום!")
+                st.dataframe(flagged.rename(columns={'Beneficiary': 'משפחה', 'Credit': 'שולם בפועל', 'Expected': 'צפי', 'Gap': 'חוב'}), use_container_width=True)
                 flagged_family_names = flagged['Beneficiary'].tolist()
             else: 
                 st.success("הכל תקין!")
@@ -279,7 +314,6 @@ if uploaded_file is not None:
             with col_ui1:
                 bulk_view_flagged = st.checkbox("⚠️ תצוגה מורחבת של החריגים בלבד", value=False)
             with col_ui2:
-                # הפיכת הלוגיקה: ברירת מחדל היא להראות הכל (False ל-hide_missing)
                 hide_miss = st.checkbox("הצג חודשים עם תשלום בלבד", value=False)
 
             if bulk_view_flagged:
@@ -295,3 +329,4 @@ if uploaded_file is not None:
 
 else:
     st.info("אנא העלה קובץ אקסל.")
+            
