@@ -62,14 +62,15 @@ def categorize_expense(row):
     return row['Details'] if row['Details'] else row['Action']
 
 # --- פונקציה להצגת היסטוריית משפחה ---
-def display_family_history(family_name, df_full, start_date, end_date, show_missing_months):
+def display_family_history(family_name, df_full, start_date, end_date, hide_missing_months):
     st.markdown(f"#### 🏠 {family_name}")
     
-    # חיפוש תשלומים בתוך כל הדאטה כדי לא לפספס כלום
+    # חיפוש תשלומים בתוך כל הדאטה
     ap = df_full[(df_full['Beneficiary'] == family_name) & (df_full['Credit'] > 0)].sort_values('Date')
     gdata = []
     
-    if show_missing_months:
+    if not hide_missing_months:
+        # ברירת המחדל: הצגת כל החודשים בטווח
         norm_st = start_date.replace(day=1)
         dr = pd.date_range(start=norm_st, end=end_date, freq='MS')
         for dp in dr:
@@ -81,6 +82,7 @@ def display_family_history(family_name, df_full, start_date, end_date, show_miss
             else:
                 gdata.append({'Date': dp, 'Month': mstr, 'Credit': 0, 'Details': '❌ לא שולם'})
     else:
+        # הצגת תשלומים בלבד
         for _, r in ap.iterrows():
             gdata.append({'Date': r['Date'], 'Month': r['Month'], 'Credit': r['Credit'], 'Details': r['Details']})
     
@@ -92,7 +94,8 @@ def display_family_history(family_name, df_full, start_date, end_date, show_miss
         fig.update_layout(xaxis=dict(tickmode='array', tickvals=gdf['RowID'], ticktext=gdf['Month']), 
                           yaxis=dict(range=[0, mc*1.2]), showlegend=False, bargap=0.3, height=350)
         fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside', cliponaxis=False)
-        if show_missing_months: 
+        # החלת טקסט ריק על עמודות עם 0 אם אנחנו מציגים חודשים חסרים
+        if not hide_missing_months:
             fig.for_each_trace(lambda t: t.update(text=[v if v>0 else "" for v in t.y]))
         st.plotly_chart(fig, use_container_width=True)
     
@@ -123,7 +126,7 @@ if uploaded_file is not None:
                 selected_idx = income_rows[income_rows['Label'] == selected_row_label]['OriginalIndex'].values[0]
                 current_families = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
                 target_family = st.selectbox("שייך למשפחה:", ["- בחר -"] + current_families + ["משפחה חדשה..."])
-                if target_family == "משחה חדשה...":
+                if target_family == "משפחה חדשה...":
                     target_family = st.text_input("הזן שם משפחה:")
                 if st.button("בצע שיוך"):
                     if target_family and target_family != "- בחר -":
@@ -235,7 +238,6 @@ if uploaded_file is not None:
         st.markdown("---")
         st.header("📋 דוחות מפורטים וחריגים")
 
-        # חישוב חריגים (שמרתי את המשתנה flagged לשימוש בפירוט למטה)
         flagged_family_names = []
         with st.expander("⚠️ דוח חריגים שנתי (בדיקת תשלום חכם)", expanded=True):
             last_date_val = df['Date'].max(); last_year_val = last_date_val.year
@@ -263,7 +265,7 @@ if uploaded_file is not None:
             
             if not flagged.empty: 
                 st.dataframe(flagged.rename(columns={'Credit': 'שולם', 'Gap': 'חוב'}), use_container_width=True)
-                flagged_family_names = flagged['Beneficiary'].tolist() # שמירת רשימת החריגים
+                flagged_family_names = flagged['Beneficiary'].tolist()
             else: 
                 st.success("הכל תקין!")
 
@@ -275,22 +277,21 @@ if uploaded_file is not None:
         if all_paying_families:
             col_ui1, col_ui2 = st.columns([1, 1])
             with col_ui1:
-                # שינוי השם והלוגיקה של הצ'קבוקס
                 bulk_view_flagged = st.checkbox("⚠️ תצוגה מורחבת של החריגים בלבד", value=False)
             with col_ui2:
-                show_miss = st.checkbox("הצג חודשים ללא תשלום בגרפים", value=False)
+                # הפיכת הלוגיקה: ברירת מחדל היא להראות הכל (False ל-hide_missing)
+                hide_miss = st.checkbox("הצג חודשים עם תשלום בלבד", value=False)
 
             if bulk_view_flagged:
                 if flagged_family_names:
                     st.warning(f"מציג היסטוריה עבור {len(flagged_family_names)} משפחות חריגות:")
                     for family in flagged_family_names:
-                        display_family_history(family, df, start_date, end_date, show_miss)
+                        display_family_history(family, df, start_date, end_date, hide_miss)
                 else:
                     st.info("לא נמצאו חריגים להצגה.")
             else:
-                # מצב רגיל - בחירה ידנית
                 selected_family = st.selectbox("בחר משפחה לצפייה:", all_paying_families)
-                display_family_history(selected_family, df, start_date, end_date, show_miss)
+                display_family_history(selected_family, df, start_date, end_date, hide_miss)
 
 else:
     st.info("אנא העלה קובץ אקסל.")
