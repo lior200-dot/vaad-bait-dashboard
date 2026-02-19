@@ -61,11 +61,12 @@ def categorize_expense(row):
         return 'גז ניהול מבנים'
     return row['Details'] if row['Details'] else row['Action']
 
-# --- פונקציה להצגת היסטוריית משפחה (למניעת כפל קוד) ---
-def display_family_history(family_name, df_filtered, start_date, end_date, show_missing_months):
+# --- פונקציה להצגת היסטוריית משפחה ---
+def display_family_history(family_name, df_full, start_date, end_date, show_missing_months):
     st.markdown(f"#### 🏠 {family_name}")
     
-    ap = df_filtered[(df_filtered['Beneficiary'] == family_name) & (df_filtered['Credit'] > 0)].sort_values('Date')
+    # חיפוש תשלומים בתוך כל הדאטה כדי לא לפספס כלום
+    ap = df_full[(df_full['Beneficiary'] == family_name) & (df_full['Credit'] > 0)].sort_values('Date')
     gdata = []
     
     if show_missing_months:
@@ -122,7 +123,7 @@ if uploaded_file is not None:
                 selected_idx = income_rows[income_rows['Label'] == selected_row_label]['OriginalIndex'].values[0]
                 current_families = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
                 target_family = st.selectbox("שייך למשפחה:", ["- בחר -"] + current_families + ["משפחה חדשה..."])
-                if target_family == "משפחה חדשה...":
+                if target_family == "משחה חדשה...":
                     target_family = st.text_input("הזן שם משפחה:")
                 if st.button("בצע שיוך"):
                     if target_family and target_family != "- בחר -":
@@ -234,8 +235,10 @@ if uploaded_file is not None:
         st.markdown("---")
         st.header("📋 דוחות מפורטים וחריגים")
 
+        # חישוב חריגים (שמרתי את המשתנה flagged לשימוש בפירוט למטה)
+        flagged_family_names = []
         with st.expander("⚠️ דוח חריגים שנתי (בדיקת תשלום חכם)", expanded=True):
-            last_date = df['Date'].max(); last_year = last_date.year
+            last_date_val = df['Date'].max(); last_year_val = last_date_val.year
             avail_years = sorted(df['Date'].dt.year.dropna().unique().astype(int), reverse=True)
             c1, c2, c3 = st.columns(3)
             with c1: sel_y = st.selectbox("שנה לבדיקה:", avail_years)
@@ -245,7 +248,7 @@ if uploaded_file is not None:
             with d1: d_bef = st.number_input("ימים לפני:", value=0)
             with d2: d_aft = st.number_input("ימים אחרי:", value=0)
             
-            y_st = datetime(sel_y, 1, 1); y_en = last_date if sel_y == last_year else datetime(sel_y, 12, 31)
+            y_st = datetime(sel_y, 1, 1); y_en = last_date_val if sel_y == last_year_val else datetime(sel_y, 12, 31)
             s_st = y_st - timedelta(days=d_bef); s_en = y_en + timedelta(days=d_aft)
             m_count = (y_en.year - y_st.year) * 12 + (y_en.month - y_st.month) + 1
             exp_total = m_count * m_fee
@@ -257,32 +260,37 @@ if uploaded_file is not None:
             m_audit = pd.merge(all_p, y_p, on='Beneficiary', how='left').fillna(0)
             m_audit['Gap'] = exp_total - m_audit['Credit']
             flagged = m_audit[m_audit['Gap'] > tol].sort_values('Gap', ascending=False)
-            if not flagged.empty: st.dataframe(flagged.rename(columns={'Credit': 'שולם', 'Gap': 'חוב'}), use_container_width=True)
-            else: st.success("הכל תקין!")
+            
+            if not flagged.empty: 
+                st.dataframe(flagged.rename(columns={'Credit': 'שולם', 'Gap': 'חוב'}), use_container_width=True)
+                flagged_family_names = flagged['Beneficiary'].tolist() # שמירת רשימת החריגים
+            else: 
+                st.success("הכל תקין!")
 
-        # ==========================================
-        #  הוספת הצ'קבוקס לתצוגה מורחבת
-        # ==========================================
+        # --- חלק ה': פירוט תשלומים למשפחה ---
         st.subheader("🔎 פירוט תשלומים למשפחה")
         
-        all_paying_families = sorted(df_filtered[df_filtered['Credit'] > 0]['Beneficiary'].unique())
+        all_paying_families = sorted(df[df['Credit'] > 0]['Beneficiary'].unique())
         
         if all_paying_families:
             col_ui1, col_ui2 = st.columns([1, 1])
             with col_ui1:
-                bulk_view = st.checkbox("🔓 תצוגה מורחבת (הצג את כל המשפחות אחת מתחת לשנייה)", value=False)
+                # שינוי השם והלוגיקה של הצ'קבוקס
+                bulk_view_flagged = st.checkbox("⚠️ תצוגה מורחבת של החריגים בלבד", value=False)
             with col_ui2:
                 show_miss = st.checkbox("הצג חודשים ללא תשלום בגרפים", value=False)
 
-            if bulk_view:
-                # מצב תצוגה מורחבת - לולאה על כל המשפחות
-                st.info(f"מציג את כל {len(all_paying_families)} המשפחות ברצף:")
-                for family in all_paying_families:
-                    display_family_history(family, df_filtered, start_date, end_date, show_miss)
+            if bulk_view_flagged:
+                if flagged_family_names:
+                    st.warning(f"מציג היסטוריה עבור {len(flagged_family_names)} משפחות חריגות:")
+                    for family in flagged_family_names:
+                        display_family_history(family, df, start_date, end_date, show_miss)
+                else:
+                    st.info("לא נמצאו חריגים להצגה.")
             else:
-                # מצב רגיל - תיבת בחירה
+                # מצב רגיל - בחירה ידנית
                 selected_family = st.selectbox("בחר משפחה לצפייה:", all_paying_families)
-                display_family_history(selected_family, df_filtered, start_date, end_date, show_miss)
+                display_family_history(selected_family, df, start_date, end_date, show_miss)
 
 else:
     st.info("אנא העלה קובץ אקסל.")
