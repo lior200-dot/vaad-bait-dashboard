@@ -98,7 +98,28 @@ def display_family_history(family_name, df_full, start_date, end_date, hide_miss
         if not hide_missing_months:
             fig.for_each_trace(lambda t: t.update(text=[v if v>0 else "" for v in t.y]))
         
-        # --- התיקון כאן: תוספת מזהה ייחודי key ---
+        # ==========================================
+        # הוספת מסגרת מקווקוות לתשלומים באותו חודש
+        # ==========================================
+        month_counts = gdf['Month'].value_counts()
+        multi_months = month_counts[month_counts > 1].index
+        
+        for m in multi_months:
+            m_data = gdf[gdf['Month'] == m]
+            # מציאת גבולות המלבן
+            x0 = m_data['RowID'].min() - 0.45
+            x1 = m_data['RowID'].max() + 0.45
+            y_max = m_data['Credit'].max()
+            
+            if y_max > 0:
+                fig.add_shape(
+                    type="rect",
+                    x0=x0, y0=0, x1=x1, y1=y_max * 1.2, # גובה המלבן מעט מעל לעמודה
+                    line=dict(color="gray", width=2, dash="dashdot"), # קו מקווקו
+                    fillcolor="rgba(0,0,0,0)", # רקע שקוף
+                    layer="below"
+                )
+        
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{family_name}")
     else:
         st.info("אין תשלומים להצגה בטווח זה.")
@@ -106,7 +127,6 @@ def display_family_history(family_name, df_full, start_date, end_date, hide_miss
     tdf = ap[['Date', 'Credit', 'Details', 'Action']].copy()
     tdf['Date'] = tdf['Date'].dt.strftime('%d/%m/%Y')
     
-    # --- התיקון כאן: תוספת מזהה ייחודי key ---
     st.dataframe(tdf, use_container_width=True, hide_index=True, key=f"table_{family_name}")
     
     st.write(f"**סה\"כ שולם ע\"י {family_name}:** {ap['Credit'].sum():,.0f} ₪")
@@ -330,6 +350,3 @@ if uploaded_file is not None:
 
 else:
     st.info("אנא העלה קובץ אקסל.")
-
-
-
