@@ -91,7 +91,7 @@ def display_family_history(family_name, df_full, start_date, end_date, hide_miss
         gdf['RowID'] = range(len(gdf))
         mc = gdf['Credit'].max() if not gdf.empty else 100
         fig = px.bar(gdf, x='RowID', y='Credit', text='Credit', color='Month')
-        fig.update_layout(xaxis=dict(tickmode='array', tickvals=gdf['RowID'], ticktext=gdf['Month']), 
+        fig.update_layout(xaxis=dict(tickmode='array', tickvals=gdf['RowID'], ticktext=gdf['Month'], tickangle=-90), 
                           yaxis=dict(range=[0, mc*1.2]), showlegend=False, bargap=0.3, height=350)
         
         fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside', cliponaxis=False)
@@ -330,5 +330,6 @@ if uploaded_file is not None:
 
 else:
     st.info("אנא העלה קובץ אקסל.")
+
 
 
