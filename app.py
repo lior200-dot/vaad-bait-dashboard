@@ -298,16 +298,44 @@ if not df_bank.empty or not df_manual.empty:
                 st.metric("סה\"כ הוצאות לחודש זה:", f"{ep['Debit'].sum():,.0f} ₪")
             else: st.info("אין הוצאות בחודש זה.")
     with c_r2_2:
-        st.subheader("הוצאות חשמל")
-        is_elec = df_filtered['Action'].str.contains('חשמל', na=False) | df_filtered['Details'].str.contains('חשמל', na=False)
-        el_df = df_filtered[is_elec & (df_filtered['Debit'] > 0)]
-        if not el_df.empty:
-            mel = el_df.groupby('Month')['Debit'].sum().reset_index()
-            mel['SortDate'] = pd.to_datetime(mel['Month'], format='%m/%Y')
-            mel = mel.sort_values('SortDate')
-            fig = px.bar(mel, x='Month', y='Debit', text='Debit', color_discrete_sequence=['orange'])
-            fig.update_traces(texttemplate='%{text:.0f}', textposition='outside'); st.plotly_chart(fig, use_container_width=True)
-        else: st.info("אין הוצאות חשמל בתקופה זו.")
+        st.subheader("היסטוריית הוצאות לפי סוג") 
+        
+        # סינון כל ההוצאות בטווח התאריכים שנבחר
+        all_expenses = df_filtered[df_filtered['Debit'] > 0].copy()
+        
+        if not all_expenses.empty:
+            # הפעלת פונקציית הקטגוריות כדי לקבל שמות אחידים
+            all_expenses['Category'] = all_expenses.apply(categorize_expense, axis=1)
+            
+            # יצירת רשימה ייחודית וממוינת של כל סוגי ההוצאות
+            unique_categories = sorted(all_expenses['Category'].unique().tolist())
+            
+            # יצירת תיבת הבחירה (Dropdown)
+            selected_category = st.selectbox("בחר סוג הוצאה להצגה:", unique_categories)
+            
+            # סינון הנתונים רק לקטגוריה שנבחרה
+            cat_df = all_expenses[all_expenses['Category'] == selected_category]
+            
+            if not cat_df.empty:
+                # קיבוץ לפי חודש
+                mcat = cat_df.groupby('Month')['Debit'].sum().reset_index()
+                # סידור כרונולוגי של החודשים
+                mcat['SortDate'] = pd.to_datetime(mcat['Month'], format='%m/%Y')
+                mcat = mcat.sort_values('SortDate')
+                
+                # יצירת הגרף
+                fig = px.bar(mcat, x='Month', y='Debit', text='Debit', color_discrete_sequence=['orange'])
+                fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+                
+                # הוספת קצת מרווח בחלק העליון של הגרף כדי שהמספרים לא ייחתכו
+                max_val = mcat['Debit'].max()
+                fig.update_layout(yaxis=dict(range=[0, max_val * 1.2])) 
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info(f"אין הוצאות עבור '{selected_category}' בתקופה זו.")
+        else:
+            st.info("אין הוצאות כלל בתקופה זו.")
 
     # ========================================================
     #  חלק ג': פילוח קטגוריות
@@ -401,3 +429,4 @@ if not df_bank.empty or not df_manual.empty:
 
 else:
     st.info("אנא העלה קובץ אקסל (בנק או ידני) כדי להתחיל.")
+
